@@ -7,10 +7,15 @@ import com.video_streaming.project_video.DTOs.CompletePresignedUploadDTO;
 import com.video_streaming.project_video.DTOs.PresignedUploadResponseDTO;
 import com.video_streaming.project_video.DTOs.UserDTO;
 import com.video_streaming.project_video.DTOs.VideoDTO;
+import com.video_streaming.project_video.Entity.User;
 import com.video_streaming.project_video.Entity.Video;
 import com.video_streaming.project_video.Enums.VideoCategory;
 import com.video_streaming.project_video.Enums.VideoStatus;
 import com.video_streaming.project_video.Enums.VideoVisibility;
+import com.video_streaming.project_video.Repository.CommentRepository;
+import com.video_streaming.project_video.Repository.PlaylistVideoRepository;
+import com.video_streaming.project_video.Repository.WatchHistoryRepository;
+import com.video_streaming.project_video.Repository.VideoLikeRepository;
 import com.video_streaming.project_video.Repository.VideoRepository;
 import com.video_streaming.project_video.ServiceImplementation.VideoServiceImpl;
 import com.video_streaming.project_video.Utils.TranscodeProgressManager;
@@ -27,6 +32,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.net.URL;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -44,6 +50,18 @@ public class VideoUploadAndStreamingTest {
 
     @Mock
     private VideoRepository videoRepository;
+
+    @Mock
+    private CommentRepository commentRepository;
+
+    @Mock
+    private PlaylistVideoRepository playlistVideoRepository;
+
+    @Mock
+    private WatchHistoryRepository watchHistoryRepository;
+
+    @Mock
+    private VideoLikeRepository videoLikeRepository;
 
     @Mock
     private RedisTemplate<String, VideoDTO> videoRedisTemplate;
@@ -73,6 +91,10 @@ public class VideoUploadAndStreamingTest {
                 amazonS3,
                 userService,
                 videoRepository,
+                commentRepository,
+                playlistVideoRepository,
+                watchHistoryRepository,
+                videoLikeRepository,
                 videoRedisTemplate,
                 viewsRedisTemplate,
                 viewTrackingService,
@@ -197,5 +219,78 @@ public class VideoUploadAndStreamingTest {
         Video videoProcessing = new Video();
         videoProcessing.setVideoStatus(VideoStatus.PROCESSING);
         assertEquals(VideoStatus.PROCESSING, videoProcessing.getVideoStatus());
+    }
+
+    @Test
+    void testDeleteVideoSuccess() {
+        Long videoId = 777L;
+        String userId = "owner-uid-123";
+
+        User uploader = User.builder()
+                .userId(userId)
+                .user_name("creator_owner")
+                .build();
+
+        Video video = Video.builder()
+                .videoId(videoId)
+                .video_title("Video to delete")
+                .slug("video-to-delete-777")
+                .video_uploader(uploader)
+                .originalVideoPath("https://test-bideo-bucket.s3.amazonaws.com/uploads/" + userId + "/orig.mp4")
+                .thumbnail_url("https://test-bideo-bucket.s3.amazonaws.com/uploads/" + userId + "/thumb.jpg")
+                .build();
+
+        when(videoRepository.findById(videoId)).thenReturn(Optional.of(video));
+
+        boolean result = videoService.deleteVideo(userId, videoId);
+
+        assertTrue(result);
+        verify(commentRepository).deleteByVideoId(videoId);
+        verify(playlistVideoRepository).deleteByVideoId(videoId);
+        verify(watchHistoryRepository).deleteByVideoId(videoId);
+        verify(videoLikeRepository).deleteByVideoId(videoId);
+        verify(videoRedisTemplate).delete("video:id:" + videoId);
+        verify(videoRedisTemplate).delete("video:slug:video-to-delete-777");
+        verify(videoRepository).delete(video);
+    }
+
+    @Test
+    void testDeleteVideoUnauthorized() {
+        Long videoId = 777L;
+        String ownerId = "owner-uid-123";
+        String intruderId = "intruder-uid-456";
+
+        User uploader = User.builder()
+                .userId(ownerId)
+                .user_name("creator_owner")
+                .build();
+
+        Video video = Video.builder()
+                .videoId(videoId)
+                .video_title("Protected video")
+                .video_uploader(uploader)
+                .build();
+
+        when(videoRepository.findById(videoId)).thenReturn(Optional.of(video));
+
+        boolean result = videoService.deleteVideo(intruderId, videoId);
+
+        assertFalse(result);
+        verify(commentRepository, never()).deleteByVideoId(any());
+        verify(playlistVideoRepository, never()).deleteByVideoId(any());
+        verify(watchHistoryRepository, never()).deleteByVideoId(any());
+        verify(videoLikeRepository, never()).deleteByVideoId(any());
+        verify(videoRepository, never()).delete(any(Video.class));
+    }
+
+    @Test
+    void testDeleteVideoNotFound() {
+        Long videoId = 9999L;
+        when(videoRepository.findById(videoId)).thenReturn(Optional.empty());
+
+        boolean result = videoService.deleteVideo("user-1", videoId);
+
+        assertFalse(result);
+        verify(videoRepository, never()).delete(any(Video.class));
     }
 }

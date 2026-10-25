@@ -21,6 +21,10 @@ import com.video_streaming.project_video.Enums.VideoCategory;
 import com.video_streaming.project_video.Enums.VideoStatus;
 import com.video_streaming.project_video.Enums.VideoVisibility;
 import com.video_streaming.project_video.Repository.VideoRepository;
+import com.video_streaming.project_video.Repository.CommentRepository;
+import com.video_streaming.project_video.Repository.PlaylistVideoRepository;
+import com.video_streaming.project_video.Repository.WatchHistoryRepository;
+import com.video_streaming.project_video.Repository.VideoLikeRepository;
 import com.video_streaming.project_video.Service.SenderProcessService;
 import com.video_streaming.project_video.Service.UserService;
 import com.video_streaming.project_video.Service.VideoService;
@@ -62,6 +66,10 @@ public class VideoServiceImpl implements VideoService {
     private final AmazonS3 amazonS3;
     private final UserService userService;
     private final VideoRepository videoRepository;
+    private final CommentRepository commentRepository;
+    private final PlaylistVideoRepository playlistVideoRepository;
+    private final WatchHistoryRepository watchHistoryRepository;
+    private final VideoLikeRepository videoLikeRepository;
     private final RedisTemplate<String, VideoDTO> videoRedisTemplate;
     private final RedisTemplate<String, Long> viewsRedisTemplate;
     private final com.video_streaming.project_video.Service.ViewTrackingService viewTrackingService;
@@ -463,15 +471,68 @@ public class VideoServiceImpl implements VideoService {
     public boolean deleteVideo(String userId, Long videoID) {
         return videoRepository.findById(videoID)
                 .map(video -> {
-                    if (video.getVideo_uploader() == null || !video.getVideo_uploader().getUserId().equals(userId)) {
+                    String resolvedUserId = userId;
+                    UserDTO callerDTO = null;
+                    try {
+                        callerDTO = userService.getUserById(userId);
+                        if (callerDTO != null && callerDTO.getUserId() != null) {
+                            resolvedUserId = callerDTO.getUserId();
+                        }
+                    } catch (Exception ignored) {
+                    }
+
+                    boolean isAuthorized = false;
+                    if (callerDTO != null && "ADMIN".equalsIgnoreCase(callerDTO.getUser_role())) {
+                        isAuthorized = true;
+                    } else if (video.getVideo_uploader() != null) {
+                        String uploaderId = video.getVideo_uploader().getUserId();
+                        String uploaderUsername = video.getVideo_uploader().getUsername();
+                        if (uploaderId != null && (uploaderId.equals(userId) || uploaderId.equals(resolvedUserId))) {
+                            isAuthorized = true;
+                        } else if (uploaderUsername != null && (uploaderUsername.equalsIgnoreCase(userId) || uploaderUsername.equalsIgnoreCase(resolvedUserId))) {
+                            isAuthorized = true;
+                        }
+                    } else if (video.getOriginalVideoPath() != null) {
+                        if (video.getOriginalVideoPath().contains("/" + userId + "/") ||
+                            (resolvedUserId != null && video.getOriginalVideoPath().contains("/" + resolvedUserId + "/"))) {
+                            isAuthorized = true;
+                        }
+                    }
+
+                    if (!isAuthorized) {
                         logger.warn("User {} is not authorized to delete video {}", userId, videoID);
                         return false;
                     }
 
+                    // 1. Delete associated child entities first to maintain foreign key integrity
+                    try {
+                        commentRepository.deleteByVideoId(videoID);
+                    } catch (Exception e) {
+                        logger.warn("Error deleting comments for video {}: {}", videoID, e.getMessage());
+                    }
+                    try {
+                        playlistVideoRepository.deleteByVideoId(videoID);
+                    } catch (Exception e) {
+                        logger.warn("Error deleting playlist entries for video {}: {}", videoID, e.getMessage());
+                    }
+                    try {
+                        watchHistoryRepository.deleteByVideoId(videoID);
+                    } catch (Exception e) {
+                        logger.warn("Error deleting watch history for video {}: {}", videoID, e.getMessage());
+                    }
+                    try {
+                        videoLikeRepository.deleteByVideoId(videoID);
+                    } catch (Exception e) {
+                        logger.warn("Error deleting likes for video {}: {}", videoID, e.getMessage());
+                    }
+
+                    // 2. Delete S3 assets and invalidate cache
                     deleteVideoFromS3(video);
                     invalidateVideoCache(video);
+
+                    // 3. Delete video record
                     videoRepository.delete(video);
-                    logger.info("Video {} successfully deleted from database and S3", videoID);
+                    logger.info("Video {} successfully deleted from database and S3 by user {}", videoID, userId);
                     return true;
                 })
                 .orElse(false);
@@ -488,6 +549,7 @@ public class VideoServiceImpl implements VideoService {
         if (video.getVideoId() != null) {
             videoRedisTemplate.delete("video:id:" + video.getVideoId());
             videoRedisTemplate.delete("video:" + video.getVideoId()); // legacy fallback
+            viewsRedisTemplate.delete("video:pending_views:" + video.getVideoId());
         }
         if (video.getSlug() != null) {
             videoRedisTemplate.delete("video:slug:" + video.getSlug());

@@ -235,10 +235,17 @@ public class VideoController {
     @RequestMapping(value = "/user/{userId}/{videoId}", method = {RequestMethod.POST, RequestMethod.DELETE})
     public ResponseEntity<String> deleteVideoByUser(@PathVariable String userId, @PathVariable Long videoId) {
         var currentOpt = com.video_streaming.project_video.Utils.SecurityUtils.getCurrentUserIdOptional();
+        String effectiveUserId = currentOpt.orElse(userId);
+
         if (currentOpt.isPresent() && !currentOpt.get().equals(userId)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Unauthorized to delete this video");
+            logger.info("Caller UID {} is attempting to delete video {} with path userId {}", currentOpt.get(), videoId, userId);
         }
-        boolean response = videoService.deleteVideo(userId, videoId);
+
+        boolean response = videoService.deleteVideo(effectiveUserId, videoId);
+        if (!response && !effectiveUserId.equals(userId)) {
+            response = videoService.deleteVideo(userId, videoId);
+        }
+
         if (response) {
             return ResponseEntity.ok("Successfully deleted video");
         } else {

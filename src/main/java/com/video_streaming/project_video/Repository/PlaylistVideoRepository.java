@@ -26,4 +26,8 @@ public interface PlaylistVideoRepository extends JpaRepository<PlaylistVideo, Lo
     @Modifying
     @Query("DELETE FROM PlaylistVideo pv WHERE pv.playlistId = :playlistId")
     void deleteByPlaylistId(@Param("playlistId") Long playlistId);
+
+    @Modifying
+    @Query("DELETE FROM PlaylistVideo pv WHERE pv.video.videoId = :videoId")
+    void deleteByVideoId(@Param("videoId") Long videoId);
 }
