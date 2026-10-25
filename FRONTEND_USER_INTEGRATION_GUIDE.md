@@ -407,9 +407,9 @@ export const UserHandleBadge: React.FC<{ user?: UserDTO }> = ({ user }) => {
 ## 7. Phase 4: Direct-to-S3 Uploads, ABR Streaming & Scrubbing Spritesheets
 
 ### 1. Direct-to-S3 Presigned Upload (Bypasses 40MB Multipart Limit)
-Upload multi-gigabyte 4K/1080p video files directly from browser to AWS S3 using secure presigned PUT URLs:
+Upload multi-gigabyte 4K/1080p video files directly from browser to AWS S3 using secure presigned PUT URLs with unified process lifecycle tracking:
 
-#### Step 1: Request S3 Presigned URL
+#### Step 1: Request S3 Presigned URL & Process ID
 - **Endpoint**: `POST /api/vid/upload/presigned` (requires auth)
 - **Request Body**:
 ```json
@@ -421,23 +421,45 @@ Upload multi-gigabyte 4K/1080p video files directly from browser to AWS S3 using
 - **Response**:
 ```json
 {
-  "uploadUrl": "https://bideo-bucket.s3.amazonaws.com/uploads/user_123/uuid_japan_travel_4k.mp4?X-Amz-Algorithm=...",
+  "uploadUrl": "https://bideo-tech-uploads.s3.ap-south-1.amazonaws.com/uploads/user_123/uuid_japan_travel_4k.mp4?X-Amz-Algorithm=...",
   "s3Key": "uploads/user_123/uuid_japan_travel_4k.mp4",
-  "publicS3Url": "https://bideo-bucket.s3.amazonaws.com/uploads/user_123/uuid_japan_travel_4k.mp4",
+  "publicS3Url": "https://bideo-tech-uploads.s3.ap-south-1.amazonaws.com/uploads/user_123/uuid_japan_travel_4k.mp4",
+  "processId": "proc_8f14b67cd9e24a1b",
   "expiresInSeconds": 3600
 }
 ```
 
-#### Step 2: PUT Video Directly from Browser to S3
-Use standard `fetch` or `axios` with an `onUploadProgress` handler:
+> [!IMPORTANT]
+> **AWS S3 Bucket CORS Requirement**:
+> AWS S3 must have a CORS rule permitting `https://buzzclips.app` to execute `PUT` requests directly from the browser. In the **AWS S3 Console** $\rightarrow$ `bideo-tech-uploads` $\rightarrow$ **Permissions** $\rightarrow$ **Cross-origin resource sharing (CORS)**, save:
+> ```json
+> [
+>   {
+>     "AllowedHeaders": ["*"],
+>     "AllowedMethods": ["GET", "PUT", "POST", "HEAD", "DELETE"],
+>     "AllowedOrigins": ["https://buzzclips.app", "https://www.buzzclips.app", "http://localhost:3000"],
+>     "ExposeHeaders": ["ETag"],
+>     "MaxAgeSeconds": 3600
+>   }
+> ]
+> ```
+
+#### Step 2: PUT Video Directly from Browser to S3 (With Fallback)
 ```typescript
-await axios.put(uploadUrl, file, {
-  headers: { 'Content-Type': file.type },
-  onUploadProgress: (progressEvent) => {
-    const percent = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 1));
-    setUploadProgress(percent);
-  }
-});
+try {
+  await axios.put(uploadUrl, file, {
+    headers: { 'Content-Type': file.type || 'video/mp4' },
+    onUploadProgress: (progressEvent) => {
+      const percent = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 1));
+      setUploadProgress(percent);
+    }
+  });
+} catch (error) {
+  // If browser S3 direct upload failed (e.g. CORS or network drop), DO NOT call completePresignedUpload!
+  // Abort the process and notify the user:
+  await axios.post(`/api/vid/upload/process/${processId}/abort`);
+  throw new Error('S3 Direct upload failed. Please check S3 CORS or network.');
+}
 ```
 
 #### Step 3: Complete Presigned Upload & Queue Transcoding
@@ -446,6 +468,7 @@ await axios.put(uploadUrl, file, {
 ```json
 {
   "s3Key": "uploads/user_123/uuid_japan_travel_4k.mp4",
+  "processId": "proc_8f14b67cd9e24a1b",
   "videoTitle": "Tokyo at Night 4K HDR",
   "description": "Cinematic walking tour through Shinjuku.",
   "tags": ["travel", "japan", "4k"],
@@ -460,6 +483,12 @@ await axios.put(uploadUrl, file, {
   "message": "Presigned upload completed and queued for multi-rendition transcoding"
 }
 ```
+*(Note: The backend now verifies that the S3 file actually exists on S3 before registering or queueing. If the file was never uploaded to S3, this call will safely return HTTP 400 instead of creating a stuck/orphaned video.)*
+
+#### Step 4: Track Progress via Process ID or Video ID
+- **SSE Stream**: `GET /api/vid/upload/process/{processId}/progress` (or `GET /api/vid/{videoId}/transcode-progress`)
+- **Status Poll**: `GET /api/vid/upload/process/{processId}/status` (or `GET /api/vid/{videoId}/status`)
+- **Abort Process**: `POST /api/vid/upload/process/{processId}/abort`
 
 ---
 

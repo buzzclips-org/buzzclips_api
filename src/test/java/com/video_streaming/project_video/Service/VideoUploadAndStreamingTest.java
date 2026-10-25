@@ -81,6 +81,9 @@ public class VideoUploadAndStreamingTest {
     @Mock
     private ValueOperations<String, VideoDTO> valueOperations;
 
+    @Mock
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     private TranscodeProgressManager transcodeProgressManager;
     private VideoServiceImpl videoService;
 
@@ -100,7 +103,8 @@ public class VideoUploadAndStreamingTest {
                 viewTrackingService,
                 engagementService,
                 senderProcessService,
-                transcodeProgressManager
+                transcodeProgressManager,
+                jdbcTemplate
         );
         ReflectionTestUtils.setField(videoService, "bucketName", "test-bideo-bucket");
     }
@@ -115,6 +119,7 @@ public class VideoUploadAndStreamingTest {
 
         assertNotNull(response);
         assertEquals(mockUrl.toString(), response.getUploadUrl());
+        assertNotNull(response.getProcessId());
         assertTrue(response.getS3Key().startsWith("uploads/user-1/"));
         assertTrue(response.getS3Key().contains("epic_highlight.mp4"));
         assertEquals(3600, response.getExpiresInSeconds());
@@ -125,6 +130,7 @@ public class VideoUploadAndStreamingTest {
     void testCompletePresignedUpload() throws IOException {
         String s3Key = "uploads/creator-42/video_123.mp4";
         URL s3Url = new URL("https://test-bideo-bucket.s3.amazonaws.com/" + s3Key);
+        when(amazonS3.doesObjectExist("test-bideo-bucket", s3Key)).thenReturn(true);
         when(amazonS3.getUrl("test-bideo-bucket", s3Key)).thenReturn(s3Url);
 
         UserDTO uploader = UserDTO.builder()

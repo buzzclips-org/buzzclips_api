@@ -136,46 +136,30 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
                 ");");
         executeSafe("playlist_videos position index", "CREATE INDEX IF NOT EXISTS idx_pv_playlist ON playlist_videos(playlist_id, position);");
 
-        // 11. Ensure ON DELETE CASCADE constraints for foreign keys referencing vid_metadata
-        executeSafe("cascade fk_video_tags_video",
-                "DO $$ BEGIN " +
-                "IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_video_tags_video') THEN " +
-                "ALTER TABLE video_tags DROP CONSTRAINT fk_video_tags_video; " +
-                "END IF; " +
-                "ALTER TABLE video_tags ADD CONSTRAINT fk_video_tags_video FOREIGN KEY (video_id) REFERENCES vid_metadata(video_id) ON DELETE CASCADE; " +
+        // 11. Ensure ON DELETE CASCADE constraints for all foreign keys referencing vid_metadata
+        executeSafe("dynamic cascade on vid_metadata child tables",
+                "DO $$ " +
+                "DECLARE r RECORD; " +
+                "BEGIN " +
+                "    FOR r IN ( " +
+                "        SELECT c.conname, c.conrelid::regclass::text AS tbl_name " +
+                "        FROM pg_constraint c " +
+                "        WHERE c.confrelid = 'vid_metadata'::regclass AND c.contype = 'f' " +
+                "    ) LOOP " +
+                "        EXECUTE 'ALTER TABLE ' || r.tbl_name || ' DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname); " +
+                "    END LOOP; " +
                 "END $$;");
 
-        executeSafe("cascade fk_video_likes_video",
-                "DO $$ BEGIN " +
-                "IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_video_likes_video') THEN " +
-                "ALTER TABLE video_likes DROP CONSTRAINT fk_video_likes_video; " +
-                "END IF; " +
-                "ALTER TABLE video_likes ADD CONSTRAINT fk_video_likes_video FOREIGN KEY (video_id) REFERENCES vid_metadata(video_id) ON DELETE CASCADE; " +
-                "END $$;");
-
-        executeSafe("cascade fk_comments_video",
-                "DO $$ BEGIN " +
-                "IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_comments_video') THEN " +
-                "ALTER TABLE video_comments DROP CONSTRAINT fk_comments_video; " +
-                "END IF; " +
-                "ALTER TABLE video_comments ADD CONSTRAINT fk_comments_video FOREIGN KEY (video_id) REFERENCES vid_metadata(video_id) ON DELETE CASCADE; " +
-                "END $$;");
-
-        executeSafe("cascade fk_watch_history_video",
-                "DO $$ BEGIN " +
-                "IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_watch_history_video') THEN " +
-                "ALTER TABLE watch_history DROP CONSTRAINT fk_watch_history_video; " +
-                "END IF; " +
-                "ALTER TABLE watch_history ADD CONSTRAINT fk_watch_history_video FOREIGN KEY (video_id) REFERENCES vid_metadata(video_id) ON DELETE CASCADE; " +
-                "END $$;");
-
-        executeSafe("cascade fk_pv_video",
-                "DO $$ BEGIN " +
-                "IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_pv_video') THEN " +
-                "ALTER TABLE playlist_videos DROP CONSTRAINT fk_pv_video; " +
-                "END IF; " +
-                "ALTER TABLE playlist_videos ADD CONSTRAINT fk_pv_video FOREIGN KEY (video_id) REFERENCES vid_metadata(video_id) ON DELETE CASCADE; " +
-                "END $$;");
+        executeSafe("re-add cascade fk_video_tags_video",
+                "ALTER TABLE video_tags ADD CONSTRAINT fk_video_tags_video FOREIGN KEY (video_id) REFERENCES vid_metadata(video_id) ON DELETE CASCADE;");
+        executeSafe("re-add cascade fk_video_likes_video",
+                "ALTER TABLE video_likes ADD CONSTRAINT fk_video_likes_video FOREIGN KEY (video_id) REFERENCES vid_metadata(video_id) ON DELETE CASCADE;");
+        executeSafe("re-add cascade fk_comments_video",
+                "ALTER TABLE video_comments ADD CONSTRAINT fk_comments_video FOREIGN KEY (video_id) REFERENCES vid_metadata(video_id) ON DELETE CASCADE;");
+        executeSafe("re-add cascade fk_watch_history_video",
+                "ALTER TABLE watch_history ADD CONSTRAINT fk_watch_history_video FOREIGN KEY (video_id) REFERENCES vid_metadata(video_id) ON DELETE CASCADE;");
+        executeSafe("re-add cascade fk_pv_video",
+                "ALTER TABLE playlist_videos ADD CONSTRAINT fk_pv_video FOREIGN KEY (video_id) REFERENCES vid_metadata(video_id) ON DELETE CASCADE;");
 
         logger.info("Database schema migrations verification completed.");
     }

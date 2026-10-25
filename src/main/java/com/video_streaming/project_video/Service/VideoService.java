@@ -161,6 +161,20 @@ public interface VideoService {
     boolean deleteVideo(String userId, Long videoID);
 
     /**
+     * Forcefully deletes all artifacts (database records, child rows, S3 assets, Redis keys)
+     * for a video ID even if partially corrupt, orphaned, or failed during prior deletion.
+     * @param videoId The ID of the video to purge.
+     */
+    void forceDeleteVideo(Long videoId);
+
+    /**
+     * Aborts an active upload or transcoding process and cleans up any partial S3 file.
+     * @param processId The ephemeral process identifier.
+     * @param userId The authenticated user ID.
+     */
+    boolean abortUploadProcess(String processId, String userId);
+
+    /**
      * Flushes accumulated pending views from Redis to PostgreSQL.
      */
     void syncPendingViewsToDatabase();

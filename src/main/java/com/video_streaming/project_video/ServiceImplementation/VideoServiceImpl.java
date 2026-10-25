@@ -76,6 +76,7 @@ public class VideoServiceImpl implements VideoService {
     private final com.video_streaming.project_video.Service.EngagementService engagementService;
     private final SenderProcessService senderProcessService;
     private final TranscodeProgressManager transcodeProgressManager;
+    private final JdbcTemplate jdbcTemplate;
 
     private static final Duration VIDEO_CACHE_TTL = Duration.ofMinutes(cacheTTLMinutesVideo);
     private static final Duration VIEWS_CACHE_TTL = Duration.ofMinutes(cacheTTLMinutesViews);
@@ -113,6 +114,7 @@ public class VideoServiceImpl implements VideoService {
         }
         String cleanFileName = fileName.replaceAll("[^a-zA-Z0-9._-]", "_");
         String s3Key = "uploads/" + (userId != null && !userId.isBlank() ? userId : "anonymous") + "/" + UUID.randomUUID() + "_" + cleanFileName;
+        String processId = "proc_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
 
         Date expiration = new Date(System.currentTimeMillis() + 60 * 60 * 1000L); // 1 hour expiration
         GeneratePresignedUrlRequest generatePresignedUrlRequest = new GeneratePresignedUrlRequest(bucketName, s3Key)
@@ -126,10 +128,19 @@ public class VideoServiceImpl implements VideoService {
         URL presignedUrl = amazonS3.generatePresignedUrl(generatePresignedUrlRequest);
         String publicS3Url = amazonS3.getUrl(bucketName, s3Key).toString();
 
+        transcodeProgressManager.registerProcess(
+                processId,
+                "READY_FOR_UPLOAD",
+                0,
+                "PENDING",
+                "Presigned upload URL generated; awaiting client direct upload to S3"
+        );
+
         return PresignedUploadResponseDTO.builder()
                 .uploadUrl(presignedUrl.toString())
                 .s3Key(s3Key)
                 .publicS3Url(publicS3Url)
+                .processId(processId)
                 .expiresInSeconds(3600)
                 .build();
     }
@@ -140,6 +151,21 @@ public class VideoServiceImpl implements VideoService {
         if (request == null || request.getS3Key() == null || request.getS3Key().isBlank()) {
             throw new IllegalArgumentException("S3 key is required to complete presigned upload");
         }
+
+        // Verify that the file actually exists on S3 before registering metadata or queueing transcoding!
+        boolean exists = false;
+        try {
+            exists = amazonS3.doesObjectExist(bucketName, request.getS3Key());
+        } catch (Exception e) {
+            logger.warn("Could not check S3 object existence for key '{}': {}", request.getS3Key(), e.getMessage());
+        }
+
+        if (!exists) {
+            logger.error("Upload completion rejected: S3 key '{}' does not exist in bucket '{}'", request.getS3Key(), bucketName);
+            throw new IllegalStateException("Video file was not found in S3 (key: " + request.getS3Key() + 
+                    "). Please ensure browser upload completes successfully before triggering encoding.");
+        }
+
         String s3Url = amazonS3.getUrl(bucketName, request.getS3Key()).toString();
 
         Long videoId = uploadVideoMetadata(
@@ -151,6 +177,10 @@ public class VideoServiceImpl implements VideoService {
                 request.getVisibility(),
                 userId
         );
+
+        if (request.getProcessId() != null && !request.getProcessId().isBlank()) {
+            transcodeProgressManager.linkProcessToVideo(request.getProcessId(), videoId);
+        }
 
         transcodeProgressManager.updateProgress(videoId, "QUEUED", 5, "PROCESSING");
         senderProcessService.sendVideoPath(s3Url, videoId);
@@ -469,73 +499,172 @@ public class VideoServiceImpl implements VideoService {
     @Override
     @Transactional
     public boolean deleteVideo(String userId, Long videoID) {
-        return videoRepository.findById(videoID)
-                .map(video -> {
-                    String resolvedUserId = userId;
-                    UserDTO callerDTO = null;
-                    try {
-                        callerDTO = userService.getUserById(userId);
-                        if (callerDTO != null && callerDTO.getUserId() != null) {
-                            resolvedUserId = callerDTO.getUserId();
-                        }
-                    } catch (Exception ignored) {
-                    }
+        if (videoID == null) {
+            return false;
+        }
 
-                    boolean isAuthorized = false;
-                    if (callerDTO != null && "ADMIN".equalsIgnoreCase(callerDTO.getUser_role())) {
-                        isAuthorized = true;
-                    } else if (video.getVideo_uploader() != null) {
-                        String uploaderId = video.getVideo_uploader().getUserId();
-                        String uploaderUsername = video.getVideo_uploader().getUsername();
-                        if (uploaderId != null && (uploaderId.equals(userId) || uploaderId.equals(resolvedUserId))) {
-                            isAuthorized = true;
-                        } else if (uploaderUsername != null && (uploaderUsername.equalsIgnoreCase(userId) || uploaderUsername.equalsIgnoreCase(resolvedUserId))) {
-                            isAuthorized = true;
-                        }
-                    } else if (video.getOriginalVideoPath() != null) {
-                        if (video.getOriginalVideoPath().contains("/" + userId + "/") ||
-                            (resolvedUserId != null && video.getOriginalVideoPath().contains("/" + resolvedUserId + "/"))) {
-                            isAuthorized = true;
-                        }
-                    }
+        Optional<Video> videoOpt = videoRepository.findById(videoID);
+        if (videoOpt.isEmpty()) {
+            // Video might have been partially deleted on a previous attempt (DB record wiped, but orphan rows/cache linger)
+            logger.info("Video {} not found in database; executing idempotent cleanup on related tables, cache, and progress", videoID);
+            forcePurgeChildRecords(videoID);
+            invalidateVideoCacheById(videoID, null);
+            transcodeProgressManager.remove(videoID);
+            return false;
+        }
 
-                    if (!isAuthorized) {
-                        logger.warn("User {} is not authorized to delete video {}", userId, videoID);
-                        return false;
-                    }
+        Video video = videoOpt.get();
+        String resolvedUserId = userId;
+        UserDTO callerDTO = null;
+        try {
+            callerDTO = userService.getUserById(userId);
+            if (callerDTO != null && callerDTO.getUserId() != null) {
+                resolvedUserId = callerDTO.getUserId();
+            }
+        } catch (Exception ignored) {
+        }
 
-                    // 1. Delete associated child entities first to maintain foreign key integrity
-                    try {
-                        commentRepository.deleteByVideoId(videoID);
-                    } catch (Exception e) {
-                        logger.warn("Error deleting comments for video {}: {}", videoID, e.getMessage());
-                    }
-                    try {
-                        playlistVideoRepository.deleteByVideoId(videoID);
-                    } catch (Exception e) {
-                        logger.warn("Error deleting playlist entries for video {}: {}", videoID, e.getMessage());
-                    }
-                    try {
-                        watchHistoryRepository.deleteByVideoId(videoID);
-                    } catch (Exception e) {
-                        logger.warn("Error deleting watch history for video {}: {}", videoID, e.getMessage());
-                    }
-                    try {
-                        videoLikeRepository.deleteByVideoId(videoID);
-                    } catch (Exception e) {
-                        logger.warn("Error deleting likes for video {}: {}", videoID, e.getMessage());
-                    }
+        boolean isAuthorized = false;
+        if (callerDTO != null && "ADMIN".equalsIgnoreCase(callerDTO.getUser_role())) {
+            isAuthorized = true;
+        } else if (video.getVideo_uploader() != null) {
+            String uploaderId = video.getVideo_uploader().getUserId();
+            String uploaderUsername = video.getVideo_uploader().getUsername();
+            if (uploaderId != null && (uploaderId.equals(userId) || uploaderId.equals(resolvedUserId))) {
+                isAuthorized = true;
+            } else if (uploaderUsername != null && (uploaderUsername.equalsIgnoreCase(userId) || uploaderUsername.equalsIgnoreCase(resolvedUserId))) {
+                isAuthorized = true;
+            }
+        } else if (video.getOriginalVideoPath() != null) {
+            if (video.getOriginalVideoPath().contains("/" + userId + "/") ||
+                (resolvedUserId != null && video.getOriginalVideoPath().contains("/" + resolvedUserId + "/"))) {
+                isAuthorized = true;
+            }
+        } else {
+            // Video has no uploader (e.g. failed/orphaned initial upload) - allow caller to clean it up
+            isAuthorized = true;
+        }
 
-                    // 2. Delete S3 assets and invalidate cache
-                    deleteVideoFromS3(video);
-                    invalidateVideoCache(video);
+        if (!isAuthorized) {
+            logger.warn("User {} is not authorized to delete video {}", userId, videoID);
+            return false;
+        }
 
-                    // 3. Delete video record
-                    videoRepository.delete(video);
-                    logger.info("Video {} successfully deleted from database and S3 by user {}", videoID, userId);
-                    return true;
-                })
-                .orElse(false);
+        // 1. Delete associated child entities via repositories AND direct JDBC to guarantee FK integrity
+        try {
+            commentRepository.deleteByVideoId(videoID);
+        } catch (Exception e) {
+            logger.warn("Repository comment deletion notice for video {}: {}", videoID, e.getMessage());
+        }
+        try {
+            playlistVideoRepository.deleteByVideoId(videoID);
+        } catch (Exception e) {
+            logger.warn("Repository playlist deletion notice for video {}: {}", videoID, e.getMessage());
+        }
+        try {
+            watchHistoryRepository.deleteByVideoId(videoID);
+        } catch (Exception e) {
+            logger.warn("Repository watch history deletion notice for video {}: {}", videoID, e.getMessage());
+        }
+        try {
+            videoLikeRepository.deleteByVideoId(videoID);
+        } catch (Exception e) {
+            logger.warn("Repository likes deletion notice for video {}: {}", videoID, e.getMessage());
+        }
+
+        // Guarantee all child tables (including tags) are purged via direct JDBC
+        forcePurgeChildRecords(videoID);
+
+        // 2. Delete S3 assets safely (stripping query parameters and handling missing objects)
+        deleteVideoFromS3(video);
+
+        // 3. Invalidate Redis cache & transcode progress
+        invalidateVideoCache(video);
+        transcodeProgressManager.remove(videoID);
+
+        // 4. Delete the video row directly via repository and fallback to JDBC if needed
+        try {
+            videoRepository.delete(video);
+        } catch (Exception e) {
+            logger.warn("videoRepository.delete threw for video {}: {}. Purging via JDBC directly.", videoID, e.getMessage());
+            try {
+                jdbcTemplate.update("DELETE FROM vid_metadata WHERE video_id = ?", videoID);
+            } catch (Exception ex) {
+                logger.error("Failed to delete from vid_metadata for video {}: {}", videoID, ex.getMessage());
+                throw ex;
+            }
+        }
+
+        logger.info("Video {} successfully deleted from database and S3 by user {}", videoID, userId);
+        return true;
+    }
+
+    @Override
+    @Transactional
+    public void forceDeleteVideo(Long videoId) {
+        if (videoId == null) return;
+        logger.info("Executing forceful deletion and cleanup for video {}", videoId);
+
+        // 1. Try deleting S3 assets if video entity exists
+        try {
+            videoRepository.findById(videoId).ifPresent(this::deleteVideoFromS3);
+        } catch (Exception e) {
+            logger.warn("Error deleting S3 assets during force delete of video {}: {}", videoId, e.getMessage());
+        }
+
+        // 2. Purge child records from all related tables
+        forcePurgeChildRecords(videoId);
+
+        // 3. Purge main video record from vid_metadata
+        try {
+            jdbcTemplate.update("DELETE FROM vid_metadata WHERE video_id = ?", videoId);
+        } catch (Exception e) {
+            logger.warn("JDBC purge from vid_metadata for video {}: {}", videoId, e.getMessage());
+            videoRepository.findById(videoId).ifPresent(videoRepository::delete);
+        }
+
+        // 4. Invalidate caches and progress tracking
+        invalidateVideoCacheById(videoId, null);
+        transcodeProgressManager.remove(videoId);
+        logger.info("Force delete completed for video {}", videoId);
+    }
+
+    @Override
+    public boolean abortUploadProcess(String processId, String userId) {
+        if (processId == null || processId.isBlank()) return false;
+        logger.info("Aborting upload process {} for user {}", processId, userId);
+        transcodeProgressManager.updateProcessProgress(processId, "ABORTED", 0, "ABORTED", "Upload aborted by user");
+        transcodeProgressManager.removeProcess(processId);
+        return true;
+    }
+
+    private void forcePurgeChildRecords(Long videoId) {
+        if (videoId == null) return;
+        try {
+            jdbcTemplate.update("DELETE FROM video_comments WHERE video_id = ?", videoId);
+        } catch (Exception e) {
+            logger.debug("Notice: video_comments purge for video {}: {}", videoId, e.getMessage());
+        }
+        try {
+            jdbcTemplate.update("DELETE FROM video_likes WHERE video_id = ?", videoId);
+        } catch (Exception e) {
+            logger.debug("Notice: video_likes purge for video {}: {}", videoId, e.getMessage());
+        }
+        try {
+            jdbcTemplate.update("DELETE FROM watch_history WHERE video_id = ?", videoId);
+        } catch (Exception e) {
+            logger.debug("Notice: watch_history purge for video {}: {}", videoId, e.getMessage());
+        }
+        try {
+            jdbcTemplate.update("DELETE FROM playlist_videos WHERE video_id = ?", videoId);
+        } catch (Exception e) {
+            logger.debug("Notice: playlist_videos purge for video {}: {}", videoId, e.getMessage());
+        }
+        try {
+            jdbcTemplate.update("DELETE FROM video_tags WHERE video_id = ?", videoId);
+        } catch (Exception e) {
+            logger.debug("Notice: video_tags purge for video {}: {}", videoId, e.getMessage());
+        }
     }
 
     @Override
@@ -546,32 +675,35 @@ public class VideoServiceImpl implements VideoService {
 
     private void invalidateVideoCache(Video video) {
         if (video == null) return;
-        if (video.getVideoId() != null) {
-            videoRedisTemplate.delete("video:id:" + video.getVideoId());
-            videoRedisTemplate.delete("video:" + video.getVideoId()); // legacy fallback
-            viewsRedisTemplate.delete("video:pending_views:" + video.getVideoId());
+        invalidateVideoCacheById(video.getVideoId(), video.getSlug());
+    }
+
+    private void invalidateVideoCacheById(Long videoId, String slug) {
+        if (videoId != null) {
+            try {
+                videoRedisTemplate.delete("video:id:" + videoId);
+                videoRedisTemplate.delete("video:" + videoId); // legacy fallback
+                viewsRedisTemplate.delete("video:pending_views:" + videoId);
+            } catch (Exception ignored) {}
         }
-        if (video.getSlug() != null) {
-            videoRedisTemplate.delete("video:slug:" + video.getSlug());
+        if (slug != null) {
+            try {
+                videoRedisTemplate.delete("video:slug:" + slug);
+            } catch (Exception ignored) {}
         }
     }
 
     private void deleteVideoFromS3(Video video) {
+        if (video == null) return;
+
         // 1. Delete original uploaded video file
-        if (video.getOriginalVideoPath() != null) {
-            try {
-                AmazonS3URI originalUri = new AmazonS3URI(video.getOriginalVideoPath());
-                amazonS3.deleteObject(originalUri.getBucket(), originalUri.getKey());
-                logger.info("Deleted original S3 file: {}", originalUri.getKey());
-            } catch (Exception e) {
-                logger.error("Failed to delete original video from S3: {}", e.getMessage());
-            }
-        }
+        deleteS3UrlSafe(video.getOriginalVideoPath());
 
         // 2. Delete HLS chunks directory and playlist
-        if (video.getM3u8Url() != null) {
+        if (video.getM3u8Url() != null && !video.getM3u8Url().isBlank()) {
             try {
-                AmazonS3URI hlsUri = new AmazonS3URI(video.getM3u8Url());
+                String cleanUrl = stripQueryParams(video.getM3u8Url());
+                AmazonS3URI hlsUri = new AmazonS3URI(cleanUrl);
                 String key = hlsUri.getKey();
                 int lastSlashIndex = key.lastIndexOf('/');
                 if (lastSlashIndex > 0) {
@@ -581,18 +713,59 @@ public class VideoServiceImpl implements VideoService {
                     amazonS3.deleteObject(hlsUri.getBucket(), key);
                 }
             } catch (Exception e) {
-                logger.error("Failed to delete HLS folder from S3: {}", e.getMessage());
+                logger.warn("Could not parse HLS folder URI {}: {}. Attempting fallback key deletion.", video.getM3u8Url(), e.getMessage());
+                deleteS3UrlSafe(video.getM3u8Url());
             }
         }
 
         // 3. Delete thumbnail if separate
-        if (video.getThumbnail_url() != null) {
+        deleteS3UrlSafe(video.getThumbnail_url());
+
+        // 4. Delete WebP storyboard spritesheet
+        deleteS3UrlSafe(video.getStoryboard_url());
+
+        // 5. Delete WebVTT cue file
+        deleteS3UrlSafe(video.getVtt_url());
+    }
+
+    private void deleteS3UrlSafe(String s3Url) {
+        if (s3Url == null || s3Url.isBlank()) return;
+        try {
+            String cleanUrl = stripQueryParams(s3Url);
+            AmazonS3URI uri = new AmazonS3URI(cleanUrl);
+            amazonS3.deleteObject(uri.getBucket(), uri.getKey());
+            logger.info("Deleted S3 asset: bucket={}, key={}", uri.getBucket(), uri.getKey());
+        } catch (Exception e) {
             try {
-                AmazonS3URI thumbUri = new AmazonS3URI(video.getThumbnail_url());
-                amazonS3.deleteObject(thumbUri.getBucket(), thumbUri.getKey());
-            } catch (Exception ignored) {
+                String key = extractKeyFromUrl(s3Url);
+                if (key != null) {
+                    amazonS3.deleteObject(bucketName, key);
+                    logger.info("Deleted S3 asset via fallback key extraction: {}", key);
+                }
+            } catch (Exception ex) {
+                logger.warn("Notice: could not delete S3 asset '{}': {}", s3Url, ex.getMessage());
             }
         }
+    }
+
+    private String stripQueryParams(String url) {
+        if (url == null) return null;
+        int idx = url.indexOf('?');
+        return idx != -1 ? url.substring(0, idx) : url;
+    }
+
+    private String extractKeyFromUrl(String url) {
+        if (url == null || url.isBlank()) return null;
+        String clean = stripQueryParams(url);
+        int uploadsIdx = clean.indexOf("uploads/");
+        if (uploadsIdx != -1) {
+            return clean.substring(uploadsIdx);
+        }
+        int hlsIdx = clean.indexOf("hls/");
+        if (hlsIdx != -1) {
+            return clean.substring(hlsIdx);
+        }
+        return null;
     }
 
     private void deleteS3DirectoryByPrefix(String bucket, String prefix) {

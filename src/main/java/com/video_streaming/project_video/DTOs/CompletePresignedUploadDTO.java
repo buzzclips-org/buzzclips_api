@@ -18,6 +18,7 @@ public class CompletePresignedUploadDTO implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private String s3Key;
+    private String processId;
     private String videoTitle;
     private String description;
     private List<String> tags;

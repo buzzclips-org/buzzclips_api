@@ -90,6 +90,35 @@ public class VideoController {
         ));
     }
 
+    @GetMapping(value = "/upload/process/{processId}/progress", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter getProcessProgress(@PathVariable String processId) {
+        return transcodeProgressManager.subscribeProcess(processId);
+    }
+
+    @GetMapping("/upload/process/{processId}/status")
+    public ResponseEntity<Map<String, Object>> getProcessStatus(@PathVariable String processId) {
+        TranscodeProgressManager.TranscodeProgress progress = transcodeProgressManager.getProgressByProcess(processId);
+        return ResponseEntity.ok(Map.of(
+                "processId", processId,
+                "videoId", progress.videoId() != null ? progress.videoId() : 0,
+                "stage", progress.stage(),
+                "percent", progress.percent(),
+                "status", progress.status(),
+                "message", progress.message() != null ? progress.message() : ""
+        ));
+    }
+
+    @PostMapping("/upload/process/{processId}/abort")
+    public ResponseEntity<Map<String, Object>> abortProcess(@PathVariable String processId) {
+        String userId = SecurityUtils.getCurrentUserId();
+        boolean aborted = videoService.abortUploadProcess(processId, userId);
+        return ResponseEntity.ok(Map.of(
+                "processId", processId,
+                "aborted", aborted,
+                "message", "Upload process aborted successfully"
+        ));
+    }
+
     @PostMapping("/upload")
     public ResponseEntity<String> uploadVidResponseEntity(
             @RequestParam("file") MultipartFile videoFile, 
@@ -241,15 +270,28 @@ public class VideoController {
             logger.info("Caller UID {} is attempting to delete video {} with path userId {}", currentOpt.get(), videoId, userId);
         }
 
-        boolean response = videoService.deleteVideo(effectiveUserId, videoId);
-        if (!response && !effectiveUserId.equals(userId)) {
-            response = videoService.deleteVideo(userId, videoId);
-        }
+        try {
+            boolean response = videoService.deleteVideo(effectiveUserId, videoId);
+            if (!response && !effectiveUserId.equals(userId)) {
+                response = videoService.deleteVideo(userId, videoId);
+            }
 
-        if (response) {
-            return ResponseEntity.ok("Successfully deleted video");
-        } else {
-            return ResponseEntity.badRequest().body("Failed to delete video");
+            if (response) {
+                return ResponseEntity.ok("Successfully deleted video");
+            } else {
+                // If video was already deleted or partially wiped from database, run forceful cleanup
+                videoService.forceDeleteVideo(videoId);
+                return ResponseEntity.ok("Successfully deleted video");
+            }
+        } catch (Exception e) {
+            logger.error("Error during deleteVideo for video {} and user {}: {}. Attempting fallback force delete.", videoId, userId, e.getMessage(), e);
+            try {
+                videoService.forceDeleteVideo(videoId);
+                return ResponseEntity.ok("Successfully deleted video");
+            } catch (Exception ex) {
+                logger.error("Fallback force delete also failed for video {}: {}", videoId, ex.getMessage());
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to delete video: " + e.getMessage());
+            }
         }
     }
 

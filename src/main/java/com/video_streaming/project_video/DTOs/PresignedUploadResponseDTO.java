@@ -17,5 +17,6 @@ public class PresignedUploadResponseDTO implements Serializable {
     private String uploadUrl;
     private String s3Key;
     private String publicS3Url;
+    private String processId;
     private long expiresInSeconds;
 }
