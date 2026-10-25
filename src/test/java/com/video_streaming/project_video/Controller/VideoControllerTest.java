@@ -85,4 +85,15 @@ public class VideoControllerTest {
         assertEquals("Successfully deleted video", response.getBody());
         verify(videoService).deleteVideo("auth-user-99", 200L);
     }
+
+    @Test
+    void testDeleteVideo_ExceptionFallback() {
+        when(videoService.deleteVideo("user-1", 100L)).thenThrow(new RuntimeException("DB constraint error"));
+
+        ResponseEntity<String> response = videoController.deleteVideoByUser("user-1", 100L);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("Successfully deleted video", response.getBody());
+        verify(videoService).forceDeleteVideo(100L);
+    }
 }

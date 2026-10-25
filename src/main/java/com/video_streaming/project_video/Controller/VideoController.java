@@ -279,9 +279,7 @@ public class VideoController {
             if (response) {
                 return ResponseEntity.ok("Successfully deleted video");
             } else {
-                // If video was already deleted or partially wiped from database, run forceful cleanup
-                videoService.forceDeleteVideo(videoId);
-                return ResponseEntity.ok("Successfully deleted video");
+                return ResponseEntity.badRequest().body("Failed to delete video");
             }
         } catch (Exception e) {
             logger.error("Error during deleteVideo for video {} and user {}: {}. Attempting fallback force delete.", videoId, userId, e.getMessage(), e);
