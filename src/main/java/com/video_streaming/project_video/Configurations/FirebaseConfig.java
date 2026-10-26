@@ -39,9 +39,14 @@ public class FirebaseConfig {
             return FirebaseApp.getInstance();
         }
         try {
-            FirebaseOptions firebaseOptions = FirebaseOptions.builder()
-                    .setCredentials(GoogleCredentials.fromStream(getServiceAccount()))
-                    .build();
+            GoogleCredentials credentials = GoogleCredentials.fromStream(getServiceAccount());
+            FirebaseOptions.Builder builder = FirebaseOptions.builder().setCredentials(credentials);
+            if (credentials instanceof com.google.auth.oauth2.ServiceAccountCredentials sac) {
+                if (sac.getProjectId() != null && !sac.getProjectId().isBlank()) {
+                    builder.setProjectId(sac.getProjectId());
+                }
+            }
+            FirebaseOptions firebaseOptions = builder.build();
             return FirebaseApp.initializeApp(firebaseOptions);
         }
         catch (IOException e) {

@@ -58,4 +58,8 @@ public interface SupportVariables {
     int cacheTTLMinutesVideo = 3;
 
     int cacheTTLMinutesViews = 130;
+
+    String DEFAULT_FIREBASE_PROJECT_ID = "project-video-70341";
+
+    String DEFAULT_FIREBASE_AUTH_DOMAIN = "project-video-70341.firebaseapp.com";
 }

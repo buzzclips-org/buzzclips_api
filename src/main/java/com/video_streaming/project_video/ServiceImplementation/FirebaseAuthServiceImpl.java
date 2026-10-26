@@ -33,6 +33,8 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.*;
 
+import static com.video_streaming.project_video.Enums.SupportVariables.DEFAULT_FIREBASE_AUTH_DOMAIN;
+import static com.video_streaming.project_video.Enums.SupportVariables.DEFAULT_FIREBASE_PROJECT_ID;
 import static com.video_streaming.project_video.Enums.SupportVariables.refreshTokenURLSuffix;
 import static com.video_streaming.project_video.Enums.SupportVariables.resetUserURLSuffix;
 import static com.video_streaming.project_video.Enums.SupportVariables.signInTokenURLSuffix;
@@ -519,7 +521,7 @@ public class FirebaseAuthServiceImpl implements FirebaseAuthService {
         if (gcpProject != null && !gcpProject.isBlank()) {
             return gcpProject.trim();
         }
-        return "";
+        return DEFAULT_FIREBASE_PROJECT_ID;
     }
 
     @Override
@@ -529,6 +531,6 @@ public class FirebaseAuthServiceImpl implements FirebaseAuthService {
             return customDomain.trim();
         }
         String pid = getFirebaseProjectId();
-        return (pid != null && !pid.isBlank()) ? pid + ".firebaseapp.com" : "";
+        return (pid != null && !pid.isBlank()) ? pid + ".firebaseapp.com" : DEFAULT_FIREBASE_AUTH_DOMAIN;
     }
 }
