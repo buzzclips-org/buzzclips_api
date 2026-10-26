@@ -135,7 +135,7 @@ public class AuthController {
      */
     @RequestMapping(
             value = {"/google-login", "/auth/google", "/oauth/google"},
-            method = {RequestMethod.POST}
+            method = {RequestMethod.POST, RequestMethod.GET}
     )
     public ResponseEntity<com.video_streaming.project_video.DTOs.GoogleLoginResponseDTO> googleLogin(
             @RequestBody(required = false) com.video_streaming.project_video.DTOs.GoogleLoginRequestDTO bodyDTO,
