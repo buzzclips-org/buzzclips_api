@@ -272,16 +272,15 @@ public class UserServiceImpl implements UserService {
             return false;
         }
 
-        // 1. Fast-path O(1) Bloom Filter check
-        // If Bloom filter returns false, the username is 100% DEFINITELY NOT TAKEN.
-        // No PostgreSQL query needed!
-        if (usernameBloomFilter != null && !usernameBloomFilter.mightContain(clean)) {
-            logger.debug("Bloom filter fast-path: username '{}' is available", clean);
-            return true;
+        // Direct ground truth database query to guarantee 100% accuracy and prevent false availability
+        boolean taken = userRepository.existsByUserNameIgnoreCase(clean);
+        if (taken) {
+            if (usernameBloomFilter != null) {
+                usernameBloomFilter.add(clean);
+            }
+            return false;
         }
-
-        // 2. Probable match or false-positive (~1%): query database for ground truth
-        return !userRepository.existsByUserNameIgnoreCase(clean);
+        return true;
     }
 
     @Override

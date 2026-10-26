@@ -116,6 +116,15 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("available", available, "valid", valid));
     }
 
+    @GetMapping({"/auth/config", "/auth/firebase-config"})
+    public ResponseEntity<Map<String, String>> getFirebaseConfig() {
+        Map<String, String> config = new HashMap<>();
+        config.put("apiKey", firebaseAuthService.getFirebaseApiKey());
+        config.put("projectId", firebaseAuthService.getFirebaseProjectId());
+        config.put("authDomain", firebaseAuthService.getFirebaseAuthDomain());
+        return ResponseEntity.ok(config);
+    }
+
     @PostMapping("/refresh-token")
     public ResponseEntity<FirebaseRefreshTokenResponse> refreshToken(@RequestParam String refreshToken) {
         FirebaseRefreshTokenResponse response = firebaseAuthService.refreshIdToken(refreshToken);

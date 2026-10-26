@@ -11,16 +11,16 @@ import java.util.Optional;
 
 public interface UserRepository extends JpaRepository<User, String> {
 
-    @Query("SELECT u FROM User u WHERE LOWER(u.user_name) = LOWER(:userName)")
+    @Query("SELECT u FROM User u WHERE LOWER(TRIM(u.user_name)) = LOWER(:userName) OR LOWER(TRIM(u.user_name)) = LOWER(CONCAT('@', :userName))")
     Optional<User> findFirstByUserNameIgnoreCase(@Param("userName") String userName);
 
-    @Query("SELECT u FROM User u WHERE LOWER(u.user_email) = LOWER(:userEmail)")
+    @Query("SELECT u FROM User u WHERE LOWER(TRIM(u.user_email)) = LOWER(:userEmail)")
     Optional<User> findByUserEmailIgnoreCase(@Param("userEmail") String userEmail);
 
-    @Query("SELECT COUNT(u) > 0 FROM User u WHERE LOWER(u.user_name) = LOWER(:userName)")
+    @Query("SELECT COUNT(u) > 0 FROM User u WHERE LOWER(TRIM(u.user_name)) = LOWER(:userName) OR LOWER(TRIM(u.user_name)) = LOWER(CONCAT('@', :userName))")
     boolean existsByUserNameIgnoreCase(@Param("userName") String userName);
 
-    @Query("SELECT COUNT(u) > 0 FROM User u WHERE LOWER(u.user_name) = LOWER(:userName) AND u.userId != :userId")
+    @Query("SELECT COUNT(u) > 0 FROM User u WHERE (LOWER(TRIM(u.user_name)) = LOWER(:userName) OR LOWER(TRIM(u.user_name)) = LOWER(CONCAT('@', :userName))) AND u.userId != :userId")
     boolean existsByUserNameIgnoreCaseAndUserIdNot(@Param("userName") String userName, @Param("userId") String userId);
 
     @Query("SELECT COUNT(u) > 0 FROM User u WHERE LOWER(u.user_email) = LOWER(:userEmail) AND u.userId != :userId")

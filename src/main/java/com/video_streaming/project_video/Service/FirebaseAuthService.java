@@ -88,6 +88,18 @@ public interface FirebaseAuthService {
     default String generateEmailVerificationLink(String userId) {
         throw new UnsupportedOperationException("Not implemented");
     }
+
+    default String getFirebaseApiKey() {
+        return "";
+    }
+
+    default String getFirebaseProjectId() {
+        return "buzzclips-prod";
+    }
+
+    default String getFirebaseAuthDomain() {
+        return "buzzclips-prod.firebaseapp.com";
+    }
 }
 
 

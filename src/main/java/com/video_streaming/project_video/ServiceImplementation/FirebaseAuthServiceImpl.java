@@ -486,4 +486,29 @@ public class FirebaseAuthServiceImpl implements FirebaseAuthService {
                         .build())
                 .toList();
     }
+
+    @Override
+    public String getFirebaseApiKey() {
+        return FIREBASE_API_KEY != null ? FIREBASE_API_KEY.trim() : "";
+    }
+
+    @Override
+    public String getFirebaseProjectId() {
+        try {
+            if (!com.google.firebase.FirebaseApp.getApps().isEmpty()) {
+                String pid = com.google.firebase.FirebaseApp.getInstance().getOptions().getProjectId();
+                if (pid != null && !pid.isBlank()) {
+                    return pid.trim();
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Could not resolve projectId from FirebaseApp: {}", e.getMessage());
+        }
+        return "buzzclips-prod";
+    }
+
+    @Override
+    public String getFirebaseAuthDomain() {
+        return getFirebaseProjectId() + ".firebaseapp.com";
+    }
 }
