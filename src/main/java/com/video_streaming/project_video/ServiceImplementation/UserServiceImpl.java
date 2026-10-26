@@ -296,4 +296,122 @@ public class UserServiceImpl implements UserService {
         List<User> matches = userRepository.searchUsers(cleanQuery, PageRequest.of(0, safeLimit));
         return matches.stream().map(mapper::convertEntityToDTO).toList();
     }
+
+    @Override
+    @Transactional
+    public com.video_streaming.project_video.DTOs.GoogleUserSyncResult provisionOrSyncGoogleUser(
+            String uid,
+            String email,
+            String displayName,
+            String photoUrl,
+            String preferredUsername,
+            String preferredFullName
+    ) {
+        if (uid == null || uid.isBlank()) {
+            throw new IllegalArgumentException("User UID cannot be empty for Google synchronization");
+        }
+
+        UserDTOMapper mapper = new UserDTOMapper();
+        Optional<User> existingUserOpt = userRepository.findById(uid.trim());
+
+        if (existingUserOpt.isPresent()) {
+            User existing = existingUserOpt.get();
+            boolean updated = false;
+
+            if ((existing.getUser_email() == null || existing.getUser_email().isBlank()) && email != null && !email.isBlank()) {
+                existing.setUser_email(email.trim());
+                updated = true;
+            }
+            if ((existing.getAvatar_url() == null || thumbnailURLDefault.equals(existing.getAvatar_url())) && photoUrl != null && !photoUrl.isBlank()) {
+                existing.setAvatar_url(photoUrl.trim());
+                updated = true;
+            }
+            if ((existing.getFull_name() == null || existing.getFull_name().isBlank()) && displayName != null && !displayName.isBlank()) {
+                existing.setFull_name(displayName.trim());
+                updated = true;
+            }
+
+            if (updated) {
+                userRepository.save(existing);
+            }
+            return new com.video_streaming.project_video.DTOs.GoogleUserSyncResult(mapper.convertEntityToDTO(existing), false);
+        }
+
+        // New user provisioning: generate unique handle
+        String handleCandidate = null;
+        if (preferredUsername != null && !preferredUsername.isBlank()) {
+            String sanitized = sanitizeUsername(preferredUsername);
+            if (isUsernameValid(sanitized) && isUsernameAvailable(sanitized)) {
+                handleCandidate = sanitized;
+            }
+        }
+
+        if (handleCandidate == null) {
+            handleCandidate = generateUniqueHandle(displayName, email, uid);
+        }
+
+        String finalFullName = (preferredFullName != null && !preferredFullName.isBlank())
+                ? preferredFullName.trim()
+                : (displayName != null && !displayName.isBlank() ? displayName.trim() : handleCandidate);
+        if (finalFullName.length() > 100) {
+            finalFullName = finalFullName.substring(0, 100).trim();
+        }
+
+        String finalAvatar = (photoUrl != null && !photoUrl.isBlank()) ? photoUrl.trim() : thumbnailURLDefault;
+
+        User newUser = new User(
+                uid.trim(),
+                handleCandidate,
+                finalFullName,
+                email != null ? email.trim() : null,
+                USER_ROLE_USER,
+                finalAvatar
+        );
+
+        userRepository.save(newUser);
+        usernameBloomFilter.add(handleCandidate);
+        logger.info("Successfully provisioned new Google user: handle=@{}, uid={}", handleCandidate, uid);
+
+        return new com.video_streaming.project_video.DTOs.GoogleUserSyncResult(mapper.convertEntityToDTO(newUser), true);
+    }
+
+    private String generateUniqueHandle(String displayName, String email, String uid) {
+        String base = "";
+        if (displayName != null && !displayName.isBlank()) {
+            base = displayName.toLowerCase().replaceAll("[^a-z0-9_]", "");
+        }
+        if (base.length() < 3 && email != null && email.contains("@")) {
+            String emailPrefix = email.substring(0, email.indexOf('@')).toLowerCase().replaceAll("[^a-z0-9_]", "");
+            if (emailPrefix.length() >= 3) {
+                base = emailPrefix;
+            }
+        }
+        if (base.length() < 3) {
+            String cleanUid = uid.toLowerCase().replaceAll("[^a-z0-9_]", "");
+            base = "user_" + (cleanUid.length() >= 6 ? cleanUid.substring(0, 6) : "stream");
+        }
+        if (base.length() > 22) {
+            base = base.substring(0, 22);
+        }
+
+        // Check availability and collision resolution
+        if (isUsernameValid(base) && isUsernameAvailable(base)) {
+            return base;
+        }
+
+        for (int i = 1; i <= 999; i++) {
+            String candidate = base + i;
+            if (candidate.length() <= 30 && isUsernameValid(candidate) && isUsernameAvailable(candidate)) {
+                return candidate;
+            }
+        }
+
+        // Fallback with random suffix
+        String randomSuffix = String.format("%04d", (int) (Math.random() * 10000));
+        String fallback = (base.length() > 25 ? base.substring(0, 25) : base) + "_" + randomSuffix;
+        if (fallback.length() > 30) {
+            fallback = fallback.substring(0, 30);
+        }
+        return fallback;
+    }
 }

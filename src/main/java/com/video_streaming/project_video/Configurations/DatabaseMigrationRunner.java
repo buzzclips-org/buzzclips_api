@@ -26,6 +26,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         executeSafe("user_info full_name backfill", "UPDATE user_info SET full_name = user_name WHERE full_name IS NULL OR TRIM(full_name) = '';");
         executeSafe("user_info username lowercase unique index", "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_info_user_name_lower ON user_info (LOWER(user_name));");
         executeSafe("user_info full_name index", "CREATE INDEX IF NOT EXISTS idx_user_info_full_name ON user_info (full_name);");
+        executeSafe("user_info email index", "CREATE INDEX IF NOT EXISTS idx_user_info_user_email_lower ON user_info (LOWER(user_email));");
 
         // 2. Video metadata columns
         executeSafe("vid_metadata slug column", "ALTER TABLE vid_metadata ADD COLUMN IF NOT EXISTS slug VARCHAR(255);");

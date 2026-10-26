@@ -126,4 +126,57 @@ public class AuthController {
     public ResponseEntity<String> resetUser(@RequestParam("email") String email){
         return firebaseAuthService.sendPasswordResetEmail(email);
     }
-}
+
+    /**
+     * Firebase Google Sign-In & Seamless Account Sync.
+     * Supports JSON body or form parameters (idToken, optional username/fullName).
+     * Automatically registers new users with clean handles or updates existing profiles,
+     * sets HTTP-only session cookie, and returns rich GoogleLoginResponseDTO.
+     */
+    @RequestMapping(
+            value = {"/google-login", "/auth/google", "/oauth/google"},
+            method = {RequestMethod.POST}
+    )
+    public ResponseEntity<com.video_streaming.project_video.DTOs.GoogleLoginResponseDTO> googleLogin(
+            @RequestBody(required = false) com.video_streaming.project_video.DTOs.GoogleLoginRequestDTO bodyDTO,
+            @RequestParam(value = "idToken", required = false) String paramIdToken,
+            @RequestParam(value = "token", required = false) String paramToken,
+            @RequestParam(value = "username", required = false) String paramUsername,
+            @RequestParam(value = "fullName", required = false) String paramFullName,
+            HttpServletResponse response
+    ) {
+        String token = (bodyDTO != null && bodyDTO.getIdToken() != null && !bodyDTO.getIdToken().isBlank())
+                ? bodyDTO.getIdToken()
+                : ((paramIdToken != null && !paramIdToken.isBlank()) ? paramIdToken : paramToken);
+
+        if (token == null || token.isBlank()) {
+            throw new IllegalArgumentException("Firebase ID token (idToken) is required for Google Sign-In");
+        }
+
+        String username = (bodyDTO != null && bodyDTO.getUsername() != null && !bodyDTO.getUsername().isBlank())
+                ? bodyDTO.getUsername() : paramUsername;
+
+        String fullName = (bodyDTO != null && bodyDTO.getFullName() != null && !bodyDTO.getFullName().isBlank())
+                ? bodyDTO.getFullName() : paramFullName;
+
+        com.video_streaming.project_video.DTOs.GoogleLoginRequestDTO loginRequest =
+                com.video_streaming.project_video.DTOs.GoogleLoginRequestDTO.builder()
+                        .idToken(token.trim())
+                        .username(username)
+                        .fullName(fullName)
+                        .build();
+
+        com.video_streaming.project_video.DTOs.GoogleLoginResponseDTO loginResponse =
+                firebaseAuthService.signInWithGoogle(loginRequest);
+
+        // Set secure HTTP-only cookie
+        Cookie cookie = new Cookie("token", loginResponse.getIdToken());
+        cookie.setHttpOnly(true);
+        cookie.setPath("/");
+        cookie.setMaxAge(60 * 60 * 24); // 1 day
+        cookie.setSecure(true);
+        response.addCookie(cookie);
+
+        return ResponseEntity.ok(loginResponse);
+    }
+}

@@ -106,6 +106,62 @@ class AuthControllerTest {
         assertFalse(res2.getBody().get("available"));
     }
 
+    @Test
+    @DisplayName("Should successfully authenticate via Google login JSON payload and set HTTP-only cookie")
+    void testGoogleLoginWithJson() {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        com.video_streaming.project_video.DTOs.GoogleLoginRequestDTO request =
+                com.video_streaming.project_video.DTOs.GoogleLoginRequestDTO.builder()
+                        .idToken("valid-google-firebase-token")
+                        .username("google_hero")
+                        .fullName("Google Hero")
+                        .build();
+
+        ResponseEntity<com.video_streaming.project_video.DTOs.GoogleLoginResponseDTO> result =
+                authController.googleLogin(request, null, null, null, null, response);
+
+        assertNotNull(result);
+        assertEquals(200, result.getStatusCode().value());
+        com.video_streaming.project_video.DTOs.GoogleLoginResponseDTO body = result.getBody();
+        assertNotNull(body);
+        assertEquals("valid-google-firebase-token", body.getIdToken());
+        assertTrue(body.isNewUser());
+        assertEquals("google.com", body.getPrimaryProvider());
+        assertEquals("google_hero", body.getUser().getUsername());
+
+        Cookie cookie = response.getCookie("token");
+        assertNotNull(cookie);
+        assertEquals("valid-google-firebase-token", cookie.getValue());
+        assertTrue(cookie.isHttpOnly());
+        assertTrue(cookie.getSecure());
+    }
+
+    @Test
+    @DisplayName("Should successfully authenticate via Google login form parameters")
+    void testGoogleLoginWithFormParams() {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        ResponseEntity<com.video_streaming.project_video.DTOs.GoogleLoginResponseDTO> result =
+                authController.googleLogin(null, "param-google-token", null, "custom_handle", "Custom Name", response);
+
+        assertNotNull(result);
+        assertEquals(200, result.getStatusCode().value());
+        assertEquals("param-google-token", result.getBody().getIdToken());
+        assertNotNull(response.getCookie("token"));
+    }
+
+    @Test
+    @DisplayName("Should throw IllegalArgumentException when Google ID token is missing")
+    void testGoogleLoginMissingToken() {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        assertThrows(IllegalArgumentException.class, () ->
+                authController.googleLogin(null, null, null, null, null, response)
+        );
+        assertThrows(IllegalArgumentException.class, () ->
+                authController.googleLogin(new com.video_streaming.project_video.DTOs.GoogleLoginRequestDTO(), "   ", "", null, null, response)
+        );
+    }
+
+
     static class StubFirebaseAuthService implements FirebaseAuthService {
         String lastIdentifier;
         String lastPassword;
@@ -133,7 +189,32 @@ class AuthControllerTest {
 
         @Override
         public ResponseEntity<String> sendPasswordResetEmail(String email) { return ResponseEntity.ok("OK"); }
+
+        @Override
+        public com.video_streaming.project_video.DTOs.GoogleLoginResponseDTO signInWithGoogle(com.video_streaming.project_video.DTOs.GoogleLoginRequestDTO request) {
+            String handle = (request.getUsername() != null && !request.getUsername().isBlank()) ? request.getUsername() : "google_user";
+            String name = (request.getFullName() != null && !request.getFullName().isBlank()) ? request.getFullName() : "Google User";
+            com.video_streaming.project_video.DTOs.UserDTO user = com.video_streaming.project_video.DTOs.UserDTO.builder()
+                    .userId("google-uid-123")
+                    .username(handle)
+                    .fullName(name)
+                    .user_email("user@gmail.com")
+                    .avatar_url("https://google.com/avatar.png")
+                    .user_role("USER")
+                    .build();
+
+            return com.video_streaming.project_video.DTOs.GoogleLoginResponseDTO.builder()
+                    .idToken(request.getIdToken())
+                    .refreshToken("google-mock-refresh-token")
+                    .isNewUser(true)
+                    .primaryProvider("google.com")
+                    .providers(java.util.List.of("google.com"))
+                    .emailVerified(true)
+                    .user(user)
+                    .build();
+        }
     }
+
 
     static class StubUserService implements UserService {
         boolean available = true;

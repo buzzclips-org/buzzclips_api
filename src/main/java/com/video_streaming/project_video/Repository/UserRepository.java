@@ -23,6 +23,9 @@ public interface UserRepository extends JpaRepository<User, String> {
     @Query("SELECT COUNT(u) > 0 FROM User u WHERE LOWER(u.user_name) = LOWER(:userName) AND u.userId != :userId")
     boolean existsByUserNameIgnoreCaseAndUserIdNot(@Param("userName") String userName, @Param("userId") String userId);
 
+    @Query("SELECT COUNT(u) > 0 FROM User u WHERE LOWER(u.user_email) = LOWER(:userEmail) AND u.userId != :userId")
+    boolean existsByUserEmailIgnoreCaseAndUserIdNot(@Param("userEmail") String userEmail, @Param("userId") String userId);
+
     @Query("SELECT u FROM User u WHERE LOWER(u.user_name) LIKE LOWER(CONCAT('%', :query, '%')) OR LOWER(u.full_name) LIKE LOWER(CONCAT('%', :query, '%'))")
     List<User> searchUsers(@Param("query") String query, Pageable pageable);
 

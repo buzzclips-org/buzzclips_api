@@ -170,6 +170,15 @@ class AuthUsernameResolutionTest {
         }
 
         @Override
+        public boolean existsByUserEmailIgnoreCaseAndUserIdNot(String userEmail, String userId) {
+            return users.values().stream()
+                    .anyMatch(u -> u.getUser_email() != null
+                            && u.getUser_email().equalsIgnoreCase(userEmail)
+                            && !u.getUserId().equals(userId));
+        }
+
+
+        @Override
         public List<User> searchUsers(String query, Pageable pageable) {
             return users.values().stream()
                     .filter(u -> (u.getUser_name() != null && u.getUser_name().toLowerCase().contains(query.toLowerCase()))

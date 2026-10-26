@@ -52,4 +52,42 @@ public interface FirebaseAuthService {
      * @return A ResponseEntity with status of reset password request.
      */
     ResponseEntity<String> sendPasswordResetEmail(String email);
+
+    /**
+     * Authenticates a user using Firebase Google Sign-In.
+     * Verifies the Firebase ID token, provisions or updates the user profile in PostgreSQL,
+     * resolves handle conflicts, and returns a rich session response.
+     *
+     * @param request The Google login payload with idToken and optional custom handle/name.
+     * @return GoogleLoginResponseDTO with tokens, user DTO, provider info, and isNewUser flag.
+     */
+    default com.video_streaming.project_video.DTOs.GoogleLoginResponseDTO signInWithGoogle(com.video_streaming.project_video.DTOs.GoogleLoginRequestDTO request) {
+        throw new UnsupportedOperationException("Not implemented");
+    }
+
+    default com.video_streaming.project_video.DTOs.AccountSecurityDTO getAccountSecurity(String userId) {
+        throw new UnsupportedOperationException("Not implemented");
+    }
+
+    default String updateAccountEmail(String userId, String newEmail) {
+        throw new UnsupportedOperationException("Not implemented");
+    }
+
+    default void setAccountPassword(String userId, String newPassword) {
+        throw new UnsupportedOperationException("Not implemented");
+    }
+
+    default com.video_streaming.project_video.DTOs.AccountSecurityDTO unlinkProvider(String userId, String providerId) {
+        throw new UnsupportedOperationException("Not implemented");
+    }
+
+    default com.video_streaming.project_video.DTOs.AccountSecurityDTO linkGoogleProvider(String userId, String idToken) {
+        throw new UnsupportedOperationException("Not implemented");
+    }
+
+    default String generateEmailVerificationLink(String userId) {
+        throw new UnsupportedOperationException("Not implemented");
+    }
 }
+
+

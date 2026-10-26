@@ -71,4 +71,28 @@ public interface UserService {
     default List<UserDTO> searchUsers(String query, int limit) {
         return java.util.Collections.emptyList();
     }
+
+    /**
+     * Provisions or synchronizes a user profile authenticated via Google / Firebase.
+     * If the user already exists, updates any missing fields. If new, derives a unique, clean handle.
+     *
+     * @param uid The Firebase UID.
+     * @param email The user's email.
+     * @param displayName Display name from Google.
+     * @param photoUrl Avatar URL from Google.
+     * @param preferredUsername Optional preferred custom handle.
+     * @param preferredFullName Optional preferred custom display name.
+     * @return GoogleUserSyncResult containing UserDTO and boolean isNewUser.
+     */
+    default com.video_streaming.project_video.DTOs.GoogleUserSyncResult provisionOrSyncGoogleUser(
+            String uid,
+            String email,
+            String displayName,
+            String photoUrl,
+            String preferredUsername,
+            String preferredFullName
+    ) {
+        throw new UnsupportedOperationException("Not implemented");
+    }
 }
+

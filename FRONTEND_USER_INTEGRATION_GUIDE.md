@@ -57,7 +57,45 @@ This guide provides everything the frontend team needs to consume the updated **
 
 ---
 
-### 4. Get User Profile by ID or Handle
+### 4. Firebase Google Sign-In & One-Tap Sync
+- **Endpoint**: `POST /api/app/google-login` (also aliased to `POST /api/app/auth/google`)
+- **Content-Type**: `application/json` (or `application/x-www-form-urlencoded`)
+- **Payload**:
+```json
+{
+  "idToken": "firebase_id_token_from_google_auth",
+  "username": "optional_preferred_handle",
+  "fullName": "optional_display_name_override"
+}
+```
+- **Behavior**:
+  - Validates the Firebase ID token cryptographically.
+  - If user is new: Automatically generates a clean, unique, collision-resistant handle (e.g. `@johndoe`), sets avatar from Google profile photo, and registers them in PostgreSQL + Bloom filter. Returns `isNewUser: true`.
+  - If user already exists: Synchronizes avatar/display name/email updates. Returns `isNewUser: false`.
+  - Sets secure HTTP-only session cookie (`token`).
+- **Response**:
+```json
+{
+  "idToken": "ey...",
+  "isNewUser": true,
+  "primaryProvider": "google.com",
+  "providers": ["google.com"],
+  "emailVerified": true,
+  "user": {
+    "userId": "google_firebase_uid_123",
+    "username": "johndoe",
+    "fullName": "John Doe",
+    "user_email": "johndoe@gmail.com",
+    "avatar_url": "https://lh3.googleusercontent.com/...",
+    "user_role": "USER"
+  }
+}
+```
+
+---
+
+### 5. Get User Profile by ID or Handle
+
 - **Endpoint**: `GET /api/user/getUser/{identifier}`
 - **Parameters**: `{identifier}` can be either a Firebase UID (`uid-123`), plain username (`mkbhd`), or `@handle` (`@mkbhd`).
 - **Response**:
@@ -100,9 +138,73 @@ This guide provides everything the frontend team needs to consume the updated **
 
 ---
 
+### 7. Account Security & Provider Management (Google + Email)
+
+All endpoints below require authentication (Bearer token or `token` cookie):
+
+#### A. Get Account Security & Linked Providers
+- **Endpoint**: `GET /api/user/account` (or `GET /api/user/account/providers`)
+- **Response**:
+```json
+{
+  "userId": "google_123",
+  "email": "creator@buzzclips.app",
+  "emailVerified": true,
+  "username": "creator",
+  "fullName": "Chief Creator",
+  "avatarUrl": "https://lh3.googleusercontent.com/...",
+  "providers": [
+    {
+      "providerId": "google.com",
+      "uid": "10492839210",
+      "email": "creator@buzzclips.app",
+      "displayName": "Chief Creator",
+      "photoUrl": "https://..."
+    },
+    {
+      "providerId": "password",
+      "uid": "creator@buzzclips.app",
+      "email": "creator@buzzclips.app"
+    }
+  ],
+  "hasGoogleProvider": true,
+  "hasPasswordProvider": true,
+  "canUnlinkGoogle": true,
+  "canUnlinkPassword": true,
+  "creationTimestamp": 1729000000000,
+  "lastSignInTimestamp": 1729900000000
+}
+```
+
+#### B. Update Primary Account Email
+- **Endpoint**: `POST /api/user/account/email`
+- **Body**: `{ "newEmail": "new_email@example.com" }`
+- **Behavior**: Verifies email is not taken by another user, updates Firebase Auth + PostgreSQL, and generates an email verification link.
+
+#### C. Set / Update Password (For Google Users)
+- **Endpoint**: `POST /api/user/account/password`
+- **Body**: `{ "newPassword": "MySecurePassword123!" }`
+- **Behavior**: Enables email/password login for users who originally registered via Google Sign-In.
+
+#### D. Unlink Google Provider
+- **Endpoint**: `POST /api/user/account/providers/google/unlink`
+- **Safety**: Rejects with HTTP 400 if Google is the user's sole login method to prevent accidental account lockout!
+
+#### E. Link Google Provider
+- **Endpoint**: `POST /api/user/account/providers/google/link`
+- **Body**: `{ "idToken": "google_firebase_id_token" }`
+- **Behavior**: Connects Google authentication to an existing password-authenticated account.
+
+#### F. Generate Verification Email Link
+- **Endpoint**: `POST /api/user/account/verify-email`
+- **Response**: `{ "success": true, "actionLink": "https://..." }`
+
+---
+
 ## 3. TypeScript Interfaces
 
 Copy and paste these into your frontend `types/user.ts`:
+
 
 ```typescript
 export interface UserDTO {

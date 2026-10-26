@@ -27,8 +27,12 @@ public class UserControllerTest {
     @Mock
     private UserService userService;
 
+    @Mock
+    private com.video_streaming.project_video.Service.FirebaseAuthService firebaseAuthService;
+
     @InjectMocks
     private UserController userController;
+
 
     @BeforeEach
     void setUp() {
@@ -165,4 +169,173 @@ public class UserControllerTest {
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals(1, response.getBody().size());
     }
+
+    @Test
+    void testGetAccountSecurity_Authenticated() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("user-test-uid", null, Collections.emptyList())
+        );
+
+        com.video_streaming.project_video.DTOs.AccountSecurityDTO profile =
+                com.video_streaming.project_video.DTOs.AccountSecurityDTO.builder()
+                        .userId("user-test-uid")
+                        .email("user@example.com")
+                        .hasGoogleProvider(true)
+                        .hasPasswordProvider(true)
+                        .canUnlinkGoogle(true)
+                        .canUnlinkPassword(true)
+                        .build();
+
+        when(firebaseAuthService.getAccountSecurity("user-test-uid")).thenReturn(profile);
+
+        ResponseEntity<?> response = userController.getAccountSecurity();
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(profile, response.getBody());
+    }
+
+    @Test
+    void testGetAccountSecurity_Unauthenticated() {
+        // No authentication in SecurityContext
+        ResponseEntity<?> response = userController.getAccountSecurity();
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+    }
+
+    @Test
+    void testUpdateAccountEmail_Success() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("user-test-uid", null, Collections.emptyList())
+        );
+
+        com.video_streaming.project_video.DTOs.UpdateEmailRequestDTO request =
+                com.video_streaming.project_video.DTOs.UpdateEmailRequestDTO.builder()
+                        .newEmail("brand_new@example.com")
+                        .build();
+
+        when(firebaseAuthService.updateAccountEmail("user-test-uid", "brand_new@example.com"))
+                .thenReturn("https://verify.link");
+        when(firebaseAuthService.getAccountSecurity("user-test-uid"))
+                .thenReturn(com.video_streaming.project_video.DTOs.AccountSecurityDTO.builder()
+                        .email("brand_new@example.com")
+                        .build());
+
+        ResponseEntity<com.video_streaming.project_video.DTOs.AccountActionResponseDTO> response =
+                userController.updateAccountEmail(request, null, null);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertTrue(response.getBody().isSuccess());
+        assertEquals("https://verify.link", response.getBody().getActionLink());
+        verify(firebaseAuthService).updateAccountEmail("user-test-uid", "brand_new@example.com");
+    }
+
+    @Test
+    void testUpdateAccountEmail_MissingEmail_ReturnsBadRequest() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("user-test-uid", null, Collections.emptyList())
+        );
+
+        ResponseEntity<com.video_streaming.project_video.DTOs.AccountActionResponseDTO> response =
+                userController.updateAccountEmail(null, "", null);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertFalse(response.getBody().isSuccess());
+    }
+
+    @Test
+    void testSetAccountPassword_Success() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("user-test-uid", null, Collections.emptyList())
+        );
+
+        com.video_streaming.project_video.DTOs.SetPasswordRequestDTO request =
+                com.video_streaming.project_video.DTOs.SetPasswordRequestDTO.builder()
+                        .newPassword("securePass123!")
+                        .build();
+
+        when(firebaseAuthService.getAccountSecurity("user-test-uid"))
+                .thenReturn(com.video_streaming.project_video.DTOs.AccountSecurityDTO.builder().hasPasswordProvider(true).build());
+
+        ResponseEntity<com.video_streaming.project_video.DTOs.AccountActionResponseDTO> response =
+                userController.setAccountPassword(request, null, null);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertTrue(response.getBody().isSuccess());
+        verify(firebaseAuthService).setAccountPassword("user-test-uid", "securePass123!");
+    }
+
+    @Test
+    void testUnlinkGoogleProvider_Success() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("user-test-uid", null, Collections.emptyList())
+        );
+
+        com.video_streaming.project_video.DTOs.AccountSecurityDTO updated =
+                com.video_streaming.project_video.DTOs.AccountSecurityDTO.builder().hasGoogleProvider(false).build();
+        when(firebaseAuthService.unlinkProvider("user-test-uid", "google.com")).thenReturn(updated);
+
+        ResponseEntity<com.video_streaming.project_video.DTOs.AccountActionResponseDTO> response =
+                userController.unlinkGoogleProvider();
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertTrue(response.getBody().isSuccess());
+        verify(firebaseAuthService).unlinkProvider("user-test-uid", "google.com");
+    }
+
+    @Test
+    void testUnlinkGoogleProvider_SoleLoginMethod_FailsWithBadRequest() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("user-test-uid", null, Collections.emptyList())
+        );
+
+        when(firebaseAuthService.unlinkProvider("user-test-uid", "google.com"))
+                .thenThrow(new IllegalStateException("Cannot unlink Google: it is your only sign-in method. Please set a password first."));
+
+        ResponseEntity<com.video_streaming.project_video.DTOs.AccountActionResponseDTO> response =
+                userController.unlinkGoogleProvider();
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertFalse(response.getBody().isSuccess());
+        assertTrue(response.getBody().getMessage().contains("only sign-in method"));
+    }
+
+    @Test
+    void testLinkGoogleProvider_Success() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("user-test-uid", null, Collections.emptyList())
+        );
+
+        com.video_streaming.project_video.DTOs.LinkGoogleRequestDTO request =
+                com.video_streaming.project_video.DTOs.LinkGoogleRequestDTO.builder()
+                        .idToken("new-google-token")
+                        .build();
+
+        com.video_streaming.project_video.DTOs.AccountSecurityDTO updated =
+                com.video_streaming.project_video.DTOs.AccountSecurityDTO.builder().hasGoogleProvider(true).build();
+        when(firebaseAuthService.linkGoogleProvider("user-test-uid", "new-google-token")).thenReturn(updated);
+
+        ResponseEntity<com.video_streaming.project_video.DTOs.AccountActionResponseDTO> response =
+                userController.linkGoogleProvider(request, null, null);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertTrue(response.getBody().isSuccess());
+        verify(firebaseAuthService).linkGoogleProvider("user-test-uid", "new-google-token");
+    }
+
+    @Test
+    void testVerifyEmail_Success() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("user-test-uid", null, Collections.emptyList())
+        );
+
+        when(firebaseAuthService.generateEmailVerificationLink("user-test-uid")).thenReturn("https://verification.link");
+
+        ResponseEntity<com.video_streaming.project_video.DTOs.AccountActionResponseDTO> response =
+                userController.verifyEmail();
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertTrue(response.getBody().isSuccess());
+        assertEquals("https://verification.link", response.getBody().getActionLink());
+    }
 }
+
