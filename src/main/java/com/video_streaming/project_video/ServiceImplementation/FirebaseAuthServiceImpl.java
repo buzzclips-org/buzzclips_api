@@ -489,7 +489,14 @@ public class FirebaseAuthServiceImpl implements FirebaseAuthService {
 
     @Override
     public String getFirebaseApiKey() {
-        return FIREBASE_API_KEY != null ? FIREBASE_API_KEY.trim() : "";
+        if (FIREBASE_API_KEY != null && !FIREBASE_API_KEY.isBlank()) {
+            return FIREBASE_API_KEY.trim();
+        }
+        String envKey = System.getenv("FIREBASE_API_KEY");
+        if (envKey != null && !envKey.isBlank()) {
+            return envKey.trim();
+        }
+        return "";
     }
 
     @Override
@@ -504,11 +511,24 @@ public class FirebaseAuthServiceImpl implements FirebaseAuthService {
         } catch (Exception e) {
             logger.debug("Could not resolve projectId from FirebaseApp: {}", e.getMessage());
         }
-        return "buzzclips-prod";
+        String envPid = System.getenv("FIREBASE_PROJECT_ID");
+        if (envPid != null && !envPid.isBlank()) {
+            return envPid.trim();
+        }
+        String gcpProject = System.getenv("GOOGLE_CLOUD_PROJECT");
+        if (gcpProject != null && !gcpProject.isBlank()) {
+            return gcpProject.trim();
+        }
+        return "";
     }
 
     @Override
     public String getFirebaseAuthDomain() {
-        return getFirebaseProjectId() + ".firebaseapp.com";
+        String customDomain = System.getenv("FIREBASE_AUTH_DOMAIN");
+        if (customDomain != null && !customDomain.isBlank()) {
+            return customDomain.trim();
+        }
+        String pid = getFirebaseProjectId();
+        return (pid != null && !pid.isBlank()) ? pid + ".firebaseapp.com" : "";
     }
 }

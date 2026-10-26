@@ -94,11 +94,11 @@ public interface FirebaseAuthService {
     }
 
     default String getFirebaseProjectId() {
-        return "buzzclips-prod";
+        return "";
     }
 
     default String getFirebaseAuthDomain() {
-        return "buzzclips-prod.firebaseapp.com";
+        return "";
     }
 }
 
