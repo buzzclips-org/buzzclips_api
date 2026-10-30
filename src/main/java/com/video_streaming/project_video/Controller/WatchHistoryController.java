@@ -21,9 +21,46 @@ public class WatchHistoryController {
     @PostMapping("/api/vid/{videoId}/progress")
     public ResponseEntity<WatchProgressDTO> recordProgress(
             @PathVariable Long videoId,
-            @RequestParam("seconds") Double seconds,
-            @RequestParam(value = "duration", required = false) Double duration) {
-        String userId = SecurityUtils.getCurrentUserId();
+            @RequestParam(value = "seconds", required = false) Double secondsParam,
+            @RequestParam(value = "duration", required = false) Double durationParam,
+            @RequestBody(required = false) Map<String, Object> body) {
+        Double seconds = secondsParam;
+        Double duration = durationParam;
+        if (body != null) {
+            if (seconds == null && body.containsKey("seconds")) {
+                Object secObj = body.get("seconds");
+                if (secObj instanceof Number) {
+                    seconds = ((Number) secObj).doubleValue();
+                } else if (secObj != null) {
+                    try {
+                        seconds = Double.parseDouble(secObj.toString());
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+            if (duration == null && body.containsKey("duration")) {
+                Object durObj = body.get("duration");
+                if (durObj instanceof Number) {
+                    duration = ((Number) durObj).doubleValue();
+                } else if (durObj != null) {
+                    try {
+                        duration = Double.parseDouble(durObj.toString());
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        if (seconds == null) {
+            seconds = 0.0;
+        }
+
+        String userId = SecurityUtils.getCurrentUserIdOptional().orElse(null);
+        if (userId == null) {
+            return ResponseEntity.ok(WatchProgressDTO.builder()
+                    .videoId(videoId)
+                    .progressSeconds(seconds)
+                    .durationSeconds(duration != null ? duration : 0.0)
+                    .build());
+        }
+
         WatchProgressDTO progress = watchHistoryService.recordProgress(videoId, userId, seconds, duration);
         return ResponseEntity.ok(progress);
     }

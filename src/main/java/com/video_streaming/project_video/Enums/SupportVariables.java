@@ -19,6 +19,7 @@ public interface SupportVariables {
             "/api/vid/search/suggest",
             "/api/vid/*/related",
             "/api/vid/*/status",
+            "/api/vid/*/progress",
             "/api/vid/*/transcode-progress",
             "/api/channel/*/status",
             "/api/channel/*/subscribers",
