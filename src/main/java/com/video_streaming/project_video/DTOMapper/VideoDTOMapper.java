@@ -14,7 +14,7 @@ public class VideoDTOMapper {
 
         VideoDTO videoDTO = new VideoDTO();
         videoDTO.setVideoId(video.getVideoId());
-        videoDTO.setM3u8Url(video.getM3u8Url());
+        videoDTO.setM3u8Url(normalizeS3Url(video.getM3u8Url()));
         videoDTO.setVideo_title(video.getVideo_title());
         videoDTO.setSlug(video.getSlug());
         videoDTO.setDescription(video.getDescription());
@@ -27,9 +27,9 @@ public class VideoDTOMapper {
         videoDTO.setDislikesCount(video.getDislikesCount() != null ? video.getDislikesCount() : 0L);
         videoDTO.setVideo_duration(video.getVideo_duration());
         videoDTO.setIso_duration(video.getIso_duration());
-        videoDTO.setThumbnail_url(video.getThumbnail_url());
-        videoDTO.setStoryboard_url(video.getStoryboard_url());
-        videoDTO.setVtt_url(video.getVtt_url());
+        videoDTO.setThumbnail_url(normalizeS3Url(video.getThumbnail_url()));
+        videoDTO.setStoryboard_url(normalizeS3Url(video.getStoryboard_url()));
+        videoDTO.setVtt_url(normalizeS3Url(video.getVtt_url()));
         videoDTO.setVideoStatus(video.getVideoStatus());
 
         if (video.getVideo_uploader() != null) {
@@ -39,6 +39,19 @@ public class VideoDTOMapper {
 
         videoDTO.setSeo(seoMetadataBuilder.buildSeoMetadata(video));
         return videoDTO;
+    }
+
+    public static String normalizeS3Url(String url) {
+        if (url == null || url.isBlank()) return url;
+        // Fix virtual-hosted S3 URL with dots in bucket name (e.g. https://buzzclips.app.s3.ap-southeast-2.amazonaws.com/...)
+        // into path-style URL (https://s3.ap-southeast-2.amazonaws.com/buzzclips.app/...) to avoid SSL cert mismatch
+        if (url.contains(".s3.") || url.contains(".s3-")) {
+            return url.replaceAll(
+                    "^https?://([a-zA-Z0-9.-]+\\.[a-zA-Z0-9.-]+)\\.s3[.-]([a-zA-Z0-9-]+)\\.amazonaws\\.com/(.*)$",
+                    "https://s3.$2.amazonaws.com/$1/$3"
+            );
+        }
+        return url;
     }
 
     public Video convertDTOToEntity(VideoDTO videoDTO) {

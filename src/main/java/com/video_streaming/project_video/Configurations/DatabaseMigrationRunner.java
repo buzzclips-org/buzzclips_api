@@ -162,6 +162,16 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         executeSafe("re-add cascade fk_pv_video",
                 "ALTER TABLE playlist_videos ADD CONSTRAINT fk_pv_video FOREIGN KEY (video_id) REFERENCES vid_metadata(video_id) ON DELETE CASCADE;");
 
+        // 12. Auto-fix S3 virtual-hosted URLs for buckets with dots (e.g. buzzclips.app) to path-style URLs to resolve SSL cert mismatch
+        executeSafe("auto-convert s3 dot bucket urls in vid_metadata to path-style",
+                "UPDATE vid_metadata SET " +
+                "m3u8_url = REPLACE(m3u8_url, 'https://buzzclips.app.s3.ap-southeast-2.amazonaws.com/', 'https://s3.ap-southeast-2.amazonaws.com/buzzclips.app/'), " +
+                "thumbnail_url = REPLACE(thumbnail_url, 'https://buzzclips.app.s3.ap-southeast-2.amazonaws.com/', 'https://s3.ap-southeast-2.amazonaws.com/buzzclips.app/'), " +
+                "storyboard_url = REPLACE(storyboard_url, 'https://buzzclips.app.s3.ap-southeast-2.amazonaws.com/', 'https://s3.ap-southeast-2.amazonaws.com/buzzclips.app/'), " +
+                "vtt_url = REPLACE(vtt_url, 'https://buzzclips.app.s3.ap-southeast-2.amazonaws.com/', 'https://s3.ap-southeast-2.amazonaws.com/buzzclips.app/'), " +
+                "original_video_path = REPLACE(original_video_path, 'https://buzzclips.app.s3.ap-southeast-2.amazonaws.com/', 'https://s3.ap-southeast-2.amazonaws.com/buzzclips.app/') " +
+                "WHERE (m3u8_url LIKE '%buzzclips.app.s3%' OR thumbnail_url LIKE '%buzzclips.app.s3%');");
+
         logger.info("Database schema migrations verification completed.");
     }
 
