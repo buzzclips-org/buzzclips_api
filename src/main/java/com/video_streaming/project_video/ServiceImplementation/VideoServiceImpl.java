@@ -86,6 +86,9 @@ public class VideoServiceImpl implements VideoService {
     @Value("${aws.s3.bucket}")
     private String bucketName;
 
+    @Value("${aws.region:ap-southeast-2}")
+    private String awsRegion;
+
     @Override
     public String uploadFile(File file) {
         if (file == null || !file.exists()) {
