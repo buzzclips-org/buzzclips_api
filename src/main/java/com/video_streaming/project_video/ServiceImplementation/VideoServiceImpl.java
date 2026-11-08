@@ -8,6 +8,7 @@ import com.amazonaws.services.s3.AmazonS3URI;
 import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest;
 import com.amazonaws.services.s3.model.ListObjectsV2Request;
 import com.amazonaws.services.s3.model.ListObjectsV2Result;
+import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.amazonaws.services.s3.model.PutObjectRequest;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.video_streaming.project_video.DTOMapper.VideoDTOMapper;
@@ -207,7 +208,26 @@ public class VideoServiceImpl implements VideoService {
         for (File file : files) {
             String filenameString = fileNamePrefix + "/" + file.getName();
 
+            ObjectMetadata metadata = new ObjectMetadata();
+            metadata.setContentLength(file.length());
+            if (file.getName().endsWith(".m3u8")) {
+                metadata.setContentType("application/vnd.apple.mpegurl");
+                metadata.setCacheControl("public, max-age=3600");
+            } else if (file.getName().endsWith(".ts")) {
+                metadata.setContentType("video/MP2T");
+                metadata.setCacheControl("public, max-age=31536000, immutable");
+            } else if (file.getName().endsWith(".webp")) {
+                metadata.setContentType("image/webp");
+                metadata.setCacheControl("public, max-age=86400");
+            } else if (file.getName().endsWith(".vtt")) {
+                metadata.setContentType("text/vtt");
+                metadata.setCacheControl("public, max-age=86400");
+            }
+
             PutObjectRequest request = new PutObjectRequest(bucketName, filenameString, file);
+            if (metadata.getContentType() != null) {
+                request.setMetadata(metadata);
+            }
             amazonS3.putObject(request);
 
             if (file.getName().endsWith(".m3u8")) {
