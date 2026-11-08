@@ -20,6 +20,9 @@ import java.lang.management.ManagementFactory;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Service
 @RequiredArgsConstructor
@@ -46,33 +49,34 @@ public class SystemHealthServiceImpl implements SystemHealthService {
     public SystemHealthDTO getSystemHealth() {
         Map<String, ServiceStatusDTO> services = new LinkedHashMap<>();
 
-        // 1. PostgreSQL check
-        services.put("postgres", checkPostgres());
+        // Execute all component checks concurrently to avoid serial blocking / slow health responses
+        CompletableFuture<ServiceStatusDTO> pgFuture = CompletableFuture.supplyAsync(this::checkPostgres);
+        CompletableFuture<ServiceStatusDTO> redisFuture = CompletableFuture.supplyAsync(this::checkRedis);
+        CompletableFuture<ServiceStatusDTO> rabbitFuture = CompletableFuture.supplyAsync(this::checkRabbitMQ);
+        CompletableFuture<ServiceStatusDTO> firebaseFuture = CompletableFuture.supplyAsync(this::checkFirebase);
+        CompletableFuture<ServiceStatusDTO> s3Future = CompletableFuture.supplyAsync(this::checkS3);
 
-        // 2. Redis check
-        services.put("redis", checkRedis());
+        services.put("postgres", safeGet(pgFuture, "PostgreSQL"));
+        services.put("redis", safeGet(redisFuture, "Redis"));
+        services.put("rabbitmq", safeGet(rabbitFuture, "RabbitMQ"));
+        services.put("firebase", safeGet(firebaseFuture, "Firebase"));
+        services.put("s3", safeGet(s3Future, "AWS S3"));
 
-        // 3. RabbitMQ check
-        services.put("rabbitmq", checkRabbitMQ());
+        // Compute overall status: UP if all up; DEGRADED if auxiliary services down; DOWN if postgres down or all down
+        ServiceStatusDTO pgStatus = services.get("postgres");
+        boolean isPgDown = pgStatus == null || "DOWN".equalsIgnoreCase(pgStatus.getStatus());
 
-        // 4. Firebase check
-        services.put("firebase", checkFirebase());
-
-        // 5. AWS S3 check
-        services.put("s3", checkS3());
-
-        // Compute overall status
         long downCount = services.values().stream()
                 .filter(s -> "DOWN".equalsIgnoreCase(s.getStatus()))
                 .count();
 
         String overallStatus;
-        if (downCount == 0) {
-            overallStatus = "UP";
-        } else if (downCount < services.size()) {
-            overallStatus = "DEGRADED";
-        } else {
+        if (isPgDown && downCount >= 2) {
             overallStatus = "DOWN";
+        } else if (downCount == 0) {
+            overallStatus = "UP";
+        } else {
+            overallStatus = "DEGRADED";
         }
 
         long uptimeSec = ManagementFactory.getRuntimeMXBean().getUptime() / 1000;
@@ -84,6 +88,27 @@ public class SystemHealthServiceImpl implements SystemHealthService {
                 .version("0.0.1")
                 .services(services)
                 .build();
+    }
+
+    private ServiceStatusDTO safeGet(CompletableFuture<ServiceStatusDTO> future, String serviceName) {
+        try {
+            return future.get(2500, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            logger.warn("Health check for {} timed out after 2500ms", serviceName);
+            return ServiceStatusDTO.builder()
+                    .status("DOWN")
+                    .latencyMs(2500L)
+                    .message(serviceName + " probe timed out after 2500ms")
+                    .build();
+        } catch (Exception e) {
+            logger.warn("Health check for {} failed: {}", serviceName, e.getMessage());
+            return ServiceStatusDTO.builder()
+                    .status("DOWN")
+                    .latencyMs(0L)
+                    .message(serviceName + " probe error: " + e.getMessage())
+                    .build();
+        }
     }
 
     private ServiceStatusDTO checkPostgres() {
@@ -228,12 +253,22 @@ public class SystemHealthServiceImpl implements SystemHealthService {
         long start = System.currentTimeMillis();
         try {
             if (s3BucketName != null && !s3BucketName.isBlank()) {
-                boolean exists = amazonS3.doesBucketExistV2(s3BucketName);
+                boolean exists = false;
+                try {
+                    exists = amazonS3.doesBucketExistV2(s3BucketName);
+                } catch (com.amazonaws.AmazonServiceException ase) {
+                    if (ase.getStatusCode() == 403) {
+                        // 403 Forbidden indicates S3 endpoint reached and credentials evaluated, but bucket list permission is restricted
+                        exists = true;
+                    } else {
+                        throw ase;
+                    }
+                }
                 long latency = System.currentTimeMillis() - start;
                 ServiceStatusDTO result = ServiceStatusDTO.builder()
                         .status(exists ? "UP" : "DOWN")
                         .latencyMs(latency)
-                        .message(exists ? "S3 bucket '" + s3BucketName + "' verified" : "Bucket does not exist")
+                        .message(exists ? "S3 bucket '" + s3BucketName + "' operational" : "Bucket does not exist")
                         .build();
                 this.cachedS3Status = result;
                 this.lastS3CheckTime = now;

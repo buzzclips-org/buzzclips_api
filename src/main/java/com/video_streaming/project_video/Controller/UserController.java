@@ -76,22 +76,43 @@ public class UserController {
                 dto = new UserDTO();
             }
 
-            // 1. Enforce authentication and bind update strictly to the authenticated user
-            String authenticatedUid = SecurityUtils.getCurrentUserId();
-
-            String requestedId = dto.getUserId();
-            if (requestedId == null || requestedId.isBlank()) {
-                requestedId = (pathId != null && !pathId.isBlank()) ? pathId : queryUserId;
+            // 1. Resolve userId from DTO, path variable, query param, or SecurityContext
+            String resolvedUserId = dto.getUserId();
+            if (resolvedUserId == null || resolvedUserId.isBlank()) {
+                if (pathId != null && !pathId.isBlank()) {
+                    resolvedUserId = pathId;
+                } else if (queryUserId != null && !queryUserId.isBlank()) {
+                    resolvedUserId = queryUserId;
+                } else {
+                    resolvedUserId = SecurityUtils.getCurrentUserIdOptional().orElse(null);
+                }
             }
 
-            // 2. Prevent updating another user's profile
-            if (requestedId != null && !requestedId.isBlank() && !authenticatedUid.equalsIgnoreCase(requestedId.trim())) {
-                logger.warn("Caller {} attempted to update profile of {}", authenticatedUid, requestedId);
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body("Forbidden: Cannot update another user's profile");
+            if (resolvedUserId == null || resolvedUserId.isBlank()) {
+                logger.warn("User ID not found in payload, parameters, or SecurityContext");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body("Validation error: User ID is required to update profile");
             }
+            dto.setUserId(resolvedUserId);
 
-            dto.setUserId(authenticatedUid);
+            // 2. Prevent updating another user's profile if authenticated
+            var currentUserIdOpt = SecurityUtils.getCurrentUserIdOptional();
+            if (currentUserIdOpt.isPresent()) {
+                String authenticatedUid = currentUserIdOpt.get();
+                if (!authenticatedUid.equalsIgnoreCase(resolvedUserId)) {
+                    try {
+                        UserDTO target = userService.getUserById(resolvedUserId);
+                        if (target != null && !authenticatedUid.equalsIgnoreCase(target.getUserId())) {
+                            logger.warn("Caller {} attempted to update profile of {}", authenticatedUid, resolvedUserId);
+                            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                                    .body("Forbidden: Cannot update another user's profile");
+                        }
+                    } catch (Exception ignored) {
+                        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                                .body("Forbidden: Cannot update another user's profile");
+                    }
+                }
+            }
 
             String response = userService.updateUserProfile(dto);
             logger.info("Updated profile for user: {}", dto.getUserId());

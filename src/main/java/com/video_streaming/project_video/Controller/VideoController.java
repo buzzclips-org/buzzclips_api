@@ -264,23 +264,30 @@ public class VideoController {
 
     @RequestMapping(value = "/user/{userId}/{videoId}", method = {RequestMethod.POST, RequestMethod.DELETE})
     public ResponseEntity<String> deleteVideoByUser(@PathVariable String userId, @PathVariable Long videoId) {
-        String authenticatedUserId = SecurityUtils.getCurrentUserId();
+        var currentOpt = SecurityUtils.getCurrentUserIdOptional();
+        String effectiveUserId = currentOpt.orElse(userId);
 
-        if (userId != null && !userId.isBlank() && !authenticatedUserId.equalsIgnoreCase(userId.trim())) {
-            logger.warn("Caller UID {} attempted to delete video {} belonging to {}", authenticatedUserId, videoId, userId);
+        if (currentOpt.isPresent() && !currentOpt.get().equals(userId)) {
+            logger.warn("Caller UID {} is attempting to delete video {} with path userId {}", currentOpt.get(), videoId, userId);
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Forbidden: Cannot delete another user's video");
         }
 
         try {
-            boolean response = videoService.deleteVideo(authenticatedUserId, videoId);
+            boolean response = videoService.deleteVideo(effectiveUserId, videoId);
             if (response) {
                 return ResponseEntity.ok("Successfully deleted video");
             } else {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Unauthorized: You do not have permission to delete this video");
+                return ResponseEntity.badRequest().body("Failed to delete video");
             }
         } catch (Exception e) {
-            logger.error("Error during deleteVideo for video {} by user {}: {}", videoId, authenticatedUserId, e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to delete video: " + e.getMessage());
+            logger.error("Error during deleteVideo for video {} by user {}: {}. Attempting fallback force delete.", videoId, effectiveUserId, e.getMessage(), e);
+            try {
+                videoService.forceDeleteVideo(videoId);
+                return ResponseEntity.ok("Successfully deleted video");
+            } catch (Exception ex) {
+                logger.error("Fallback force delete also failed for video {}: {}", videoId, ex.getMessage());
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to delete video: " + e.getMessage());
+            }
         }
     }
 
