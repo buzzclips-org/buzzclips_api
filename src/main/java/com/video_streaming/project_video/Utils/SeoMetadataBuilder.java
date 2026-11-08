@@ -6,6 +6,7 @@ import java.util.*;
 
 import com.video_streaming.project_video.DTOs.SeoMetadataDTO;
 import com.video_streaming.project_video.Entity.Video;
+import com.video_streaming.project_video.DTOMapper.VideoDTOMapper;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -29,7 +30,7 @@ public class SeoMetadataBuilder {
 
         String canonicalUrl = BASE_URL + "/watch/" + identifier;
         String embedUrl = BASE_URL + "/embed/" + identifier;
-        String thumbnailUrl = video.getThumbnail_url() != null ? video.getThumbnail_url() : BASE_URL + "/default-thumbnail.jpg";
+        String thumbnailUrl = video.getThumbnail_url() != null ? VideoDTOMapper.normalizeS3Url(video.getThumbnail_url()) : BASE_URL + "/default-thumbnail.jpg";
         String uploadDateIso = video.getVideo_uploadDate() != null
                 ? Instant.ofEpochMilli(video.getVideo_uploadDate().getTime()).toString()
                 : Instant.now().toString();
@@ -46,7 +47,7 @@ public class SeoMetadataBuilder {
         jsonLd.put("uploadDate", uploadDateIso);
         jsonLd.put("duration", isoDuration);
         if (video.getM3u8Url() != null) {
-            jsonLd.put("contentUrl", video.getM3u8Url());
+            jsonLd.put("contentUrl", VideoDTOMapper.normalizeS3Url(video.getM3u8Url()));
         }
         jsonLd.put("embedUrl", embedUrl);
         if (video.getCategory() != null) {

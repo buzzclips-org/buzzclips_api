@@ -128,7 +128,7 @@ public class VideoServiceImpl implements VideoService {
         }
 
         URL presignedUrl = amazonS3.generatePresignedUrl(generatePresignedUrlRequest);
-        String publicS3Url = amazonS3.getUrl(bucketName, s3Key).toString();
+        String publicS3Url = getS3PublicUrl(bucketName, s3Key);
 
         transcodeProgressManager.registerProcess(
                 processId,
@@ -168,7 +168,7 @@ public class VideoServiceImpl implements VideoService {
                     "). Please ensure browser upload completes successfully before triggering encoding.");
         }
 
-        String s3Url = amazonS3.getUrl(bucketName, request.getS3Key()).toString();
+        String s3Url = getS3PublicUrl(bucketName, request.getS3Key());
 
         Long videoId = uploadVideoMetadata(
                 s3Url,
@@ -232,20 +232,20 @@ public class VideoServiceImpl implements VideoService {
 
             if (file.getName().endsWith(".m3u8")) {
                 if ("master.m3u8".equalsIgnoreCase(file.getName()) || s3FileURL == null) {
-                    s3FileURL = amazonS3.getUrl(bucketName, filenameString).toString();
+                    s3FileURL = getS3PublicUrl(bucketName, filenameString);
                 }
             }
 
             if (file.getName().endsWith(".webp") && !file.getName().toLowerCase().contains("storyboard")) {
-                s3ThumbnailURL = amazonS3.getUrl(bucketName, filenameString).toString();
+                s3ThumbnailURL = getS3PublicUrl(bucketName, filenameString);
             }
 
             if (file.getName().toLowerCase().contains("storyboard") && file.getName().endsWith(".webp")) {
-                s3StoryboardURL = amazonS3.getUrl(bucketName, filenameString).toString();
+                s3StoryboardURL = getS3PublicUrl(bucketName, filenameString);
             }
 
             if (file.getName().endsWith(".vtt")) {
-                s3VttURL = amazonS3.getUrl(bucketName, filenameString).toString();
+                s3VttURL = getS3PublicUrl(bucketName, filenameString);
             }
         }
 
@@ -747,6 +747,18 @@ public class VideoServiceImpl implements VideoService {
 
         // 5. Delete WebVTT cue file
         deleteS3UrlSafe(video.getVtt_url());
+    }
+
+    private String getS3PublicUrl(String bucket, String key) {
+        // If bucket name contains dots (e.g. "buzzclips.app"), virtual-hosted URLs
+        // (https://buzzclips.app.s3.region.amazonaws.com) fail RFC 6125 wildcard TLS certificate
+        // validation in browsers and Node.js. Use path-style URL for full SSL compatibility:
+        if (bucket != null && bucket.contains(".")) {
+            String region = (awsRegion != null && !awsRegion.isBlank()) ? awsRegion : "ap-southeast-2";
+            String cleanKey = key.startsWith("/") ? key.substring(1) : key;
+            return "https://s3." + region + ".amazonaws.com/" + bucket + "/" + cleanKey;
+        }
+        return amazonS3.getUrl(bucket, key).toString();
     }
 
     private void deleteS3UrlSafe(String s3Url) {

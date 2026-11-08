@@ -1,6 +1,7 @@
 package com.video_streaming.project_video.ServiceImplementation;
 
 import com.video_streaming.project_video.DTOs.WatchProgressDTO;
+import com.video_streaming.project_video.DTOMapper.VideoDTOMapper;
 import com.video_streaming.project_video.Entity.Video;
 import com.video_streaming.project_video.Entity.WatchHistory;
 import com.video_streaming.project_video.Repository.VideoRepository;
@@ -126,7 +127,7 @@ public class WatchHistoryServiceImpl implements WatchHistoryService {
                 .videoId(video.getVideoId())
                 .videoTitle(video.getVideo_title())
                 .slug(video.getSlug())
-                .thumbnailUrl(video.getThumbnail_url())
+                .thumbnailUrl(VideoDTOMapper.normalizeS3Url(video.getThumbnail_url()))
                 .channelName(channelName)
                 .channelHandle(channelHandle)
                 .channelAvatar(channelAvatar)
