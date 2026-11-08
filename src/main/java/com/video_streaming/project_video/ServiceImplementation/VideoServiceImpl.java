@@ -157,6 +157,15 @@ public class VideoServiceImpl implements VideoService {
             throw new IllegalArgumentException("S3 key is required to complete presigned upload");
         }
 
+        // Ensure that the S3 key was created for this user (prevent cross-user S3 asset claiming)
+        if (userId != null && !userId.isBlank()) {
+            String userPrefix = "uploads/" + userId + "/";
+            if (!request.getS3Key().startsWith(userPrefix) && !request.getS3Key().startsWith("uploads/anonymous/")) {
+                logger.warn("User {} attempted to complete presigned upload for mismatched S3 key: {}", userId, request.getS3Key());
+                throw new org.springframework.security.access.AccessDeniedException("Unauthorized: S3 upload key does not belong to the authenticated user");
+            }
+        }
+
         // Verify that the file actually exists on S3 before registering metadata or queueing transcoding!
         boolean exists = false;
         try {

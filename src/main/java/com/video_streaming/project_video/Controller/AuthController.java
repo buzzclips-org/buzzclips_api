@@ -104,6 +104,7 @@ public class AuthController {
         cookie.setPath("/");
         cookie.setMaxAge(60 * 60 * 24); // 1 day
         cookie.setSecure(true);
+        cookie.setAttribute("SameSite", "Lax");
         response.addCookie(cookie);
 
         return ResponseEntity.ok(firebaseResponse);
@@ -184,8 +185,9 @@ public class AuthController {
         cookie.setPath("/");
         cookie.setMaxAge(60 * 60 * 24); // 1 day
         cookie.setSecure(true);
+        cookie.setAttribute("SameSite", "Lax");
         response.addCookie(cookie);
 
         return ResponseEntity.ok(loginResponse);
     }
-}
+}

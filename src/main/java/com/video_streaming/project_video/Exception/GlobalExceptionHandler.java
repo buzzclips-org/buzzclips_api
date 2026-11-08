@@ -67,12 +67,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> handleAllExceptions(Exception e) {
-        logger.error("Exception has occurred: ", e);
+        logger.error("Unhandled internal exception occurred: ", e);
         ErrorResponseDTO errorResponseDTO = new ErrorResponseDTO(
                 LocalDateTime.now(),
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 "Internal Server Error",
-                e.getMessage()
+                "An unexpected internal error occurred. Please try again later."
         );
         return new ResponseEntity<>(errorResponseDTO, HttpStatus.INTERNAL_SERVER_ERROR);
     }

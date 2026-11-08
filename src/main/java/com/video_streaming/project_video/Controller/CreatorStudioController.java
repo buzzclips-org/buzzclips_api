@@ -23,6 +23,10 @@ public class CreatorStudioController {
 
     @GetMapping("/{creatorId}/analytics")
     public ResponseEntity<CreatorAnalyticsDTO> getCreatorAnalytics(@PathVariable String creatorId) {
+        String currentUid = SecurityUtils.getCurrentUserId();
+        if (creatorId == null || !currentUid.equalsIgnoreCase(creatorId.trim())) {
+            throw new org.springframework.security.access.AccessDeniedException("Unauthorized: Cannot view another creator's analytics");
+        }
         CreatorAnalyticsDTO analytics = creatorStudioService.getCreatorAnalytics(creatorId);
         return ResponseEntity.ok(analytics);
     }

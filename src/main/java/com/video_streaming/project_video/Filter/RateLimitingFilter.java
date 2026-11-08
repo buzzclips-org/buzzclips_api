@@ -83,13 +83,18 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     }
 
     private String extractClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
+        if (request == null) return "unknown";
+        String ip = request.getHeader("CF-Connecting-IP");
         if (ip != null && !ip.isBlank() && !"unknown".equalsIgnoreCase(ip)) {
-            return ip.split(",")[0].trim();
+            return ip.trim();
         }
         ip = request.getHeader("X-Real-IP");
         if (ip != null && !ip.isBlank() && !"unknown".equalsIgnoreCase(ip)) {
             return ip.trim();
+        }
+        ip = request.getHeader("X-Forwarded-For");
+        if (ip != null && !ip.isBlank() && !"unknown".equalsIgnoreCase(ip)) {
+            return ip.split(",")[0].trim();
         }
         return request.getRemoteAddr();
     }

@@ -76,43 +76,22 @@ public class UserController {
                 dto = new UserDTO();
             }
 
-            // 1. Resolve userId from DTO, path variable, query param, or SecurityContext
-            String resolvedUserId = dto.getUserId();
-            if (resolvedUserId == null || resolvedUserId.isBlank()) {
-                if (pathId != null && !pathId.isBlank()) {
-                    resolvedUserId = pathId;
-                } else if (queryUserId != null && !queryUserId.isBlank()) {
-                    resolvedUserId = queryUserId;
-                } else {
-                    resolvedUserId = com.video_streaming.project_video.Utils.SecurityUtils.getCurrentUserIdOptional().orElse(null);
-                }
+            // 1. Enforce authentication and bind update strictly to the authenticated user
+            String authenticatedUid = SecurityUtils.getCurrentUserId();
+
+            String requestedId = dto.getUserId();
+            if (requestedId == null || requestedId.isBlank()) {
+                requestedId = (pathId != null && !pathId.isBlank()) ? pathId : queryUserId;
             }
 
-            if (resolvedUserId == null || resolvedUserId.isBlank()) {
-                logger.warn("User ID not found in payload, parameters, or SecurityContext");
-                return ResponseEntity.status(org.springframework.http.HttpStatus.BAD_REQUEST)
-                        .body("Validation error: User ID is required to update profile");
+            // 2. Prevent updating another user's profile
+            if (requestedId != null && !requestedId.isBlank() && !authenticatedUid.equalsIgnoreCase(requestedId.trim())) {
+                logger.warn("Caller {} attempted to update profile of {}", authenticatedUid, requestedId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body("Forbidden: Cannot update another user's profile");
             }
-            dto.setUserId(resolvedUserId);
 
-            // 2. Prevent updating another user's profile if authenticated
-            var currentUserIdOpt = com.video_streaming.project_video.Utils.SecurityUtils.getCurrentUserIdOptional();
-            if (currentUserIdOpt.isPresent()) {
-                String authenticatedUid = currentUserIdOpt.get();
-                if (!authenticatedUid.equalsIgnoreCase(resolvedUserId)) {
-                    try {
-                        UserDTO target = userService.getUserById(resolvedUserId);
-                        if (target != null && !authenticatedUid.equalsIgnoreCase(target.getUserId())) {
-                            logger.warn("Caller {} attempted to update profile of {}", authenticatedUid, resolvedUserId);
-                            return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN)
-                                    .body("Forbidden: Cannot update another user's profile");
-                        }
-                    } catch (Exception ignored) {
-                        return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN)
-                                .body("Forbidden: Cannot update another user's profile");
-                    }
-                }
-            }
+            dto.setUserId(authenticatedUid);
 
             String response = userService.updateUserProfile(dto);
             logger.info("Updated profile for user: {}", dto.getUserId());

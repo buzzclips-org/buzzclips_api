@@ -75,9 +75,9 @@ public class FirebaseTokenFilter extends OncePerRequestFilter {
                 if (isWhitelisted) {
                     logger.warn("Invalid Firebase ID token on whitelisted path {}: {}", path, e.getMessage());
                 } else {
-                    logger.error(e.getMessage());
+                    logger.error("Authentication failed for path {}: {}", path, e.getMessage());
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                    response.getWriter().write("Invalid Firebase ID token: " + e.getMessage());
+                    response.getWriter().write("Invalid or expired Firebase ID token");
                     return;
                 }
             }

@@ -41,24 +41,29 @@ public class ListenerProcessServiceImpl implements ListenerProcessService {
         Long videoID = message.getVideoID();
         long timestamp = System.currentTimeMillis();
 
+        File encodedMp4 = null;
+        File hlsDir = null;
+        File outputImagePath = null;
+
         try {
             if (videoID != null) {
                 transcodeProgressManager.updateProgress(videoID, "PREPARING", 10, "PROCESSING");
             }
 
             URI uri = new URI(inputPath);
-            String fileName = Paths.get(uri.getPath()).getFileName().toString();
-            String baseName = fileName.replaceAll("\\.\\w+$", "");
+            String rawFileName = Paths.get(uri.getPath()).getFileName().toString();
+            String safeFileName = rawFileName.replaceAll("[^a-zA-Z0-9._-]", "_");
+            String baseName = safeFileName.replaceAll("\\.\\w+$", "");
 
             File outputDir = new File(processedVideosFolderPath);
             if (!outputDir.exists()) outputDir.mkdirs();
             
-            File encodedMp4 = new File(outputDir, baseName + "_720p_" + timestamp + ".mp4");
-            File hlsDir = new File(outputDir, baseName + "_hls_" + timestamp);
+            encodedMp4 = new File(outputDir, baseName + "_720p_" + timestamp + ".mp4");
+            hlsDir = new File(outputDir, baseName + "_hls_" + timestamp);
             if (!hlsDir.exists()) hlsDir.mkdirs();
 
             // 1. Generate poster thumbnail
-            File outputImagePath = new File(outputDir, baseName + "thumbnail" + ".webp");
+            outputImagePath = new File(outputDir, baseName + "thumbnail" + ".webp");
             File generatedThumbnail = generateThumbnailFromVideo(inputPath, outputImagePath);
             Path targetPath = Paths.get(hlsDir.getAbsolutePath(), generatedThumbnail.getName());
             Files.move(generatedThumbnail.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
@@ -116,11 +121,14 @@ public class ListenerProcessServiceImpl implements ListenerProcessService {
                 videoService.updateVideoEncodedPath(videoID, null, null, null, null, false);
             }
         } finally {
-            File outputDir = new File(processedVideosFolderPath);
-            if (outputDir.exists() && outputDir.isDirectory()) {
-                for (File file : Objects.requireNonNull(outputDir.listFiles())) {
-                    deleteRecursively(file);
-                }
+            if (hlsDir != null && hlsDir.exists()) {
+                deleteRecursively(hlsDir);
+            }
+            if (encodedMp4 != null && encodedMp4.exists()) {
+                encodedMp4.delete();
+            }
+            if (outputImagePath != null && outputImagePath.exists()) {
+                outputImagePath.delete();
             }
         }
     }
